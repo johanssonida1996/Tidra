@@ -1,0 +1,14 @@
+# Installeras med npm install – behövs bara för webbläsartesterna
+node_modules/
+
+# Design- och logotypunderlag ligger bara lokalt (appen använder kopiorna i assets/)
+tidra-design/
+tidra-design-mork/
+tidra-statusfarger/
+tidra-logotyp/
+tidra-docs/
+tidla-logotyp/
+
+# Playwright
+test-results/
+playwright-report/

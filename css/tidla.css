@@ -1,0 +1,3097 @@
+/* ==========================================================================
+   Tidla – stilmall
+   Alla färger och mått kommer från docs/tidra-designguide.md.
+   Mobilen först: grundstilen gäller mobil, @media (min-width: 861px) = dator.
+   ========================================================================== */
+
+/* ---------- Färger: ljust tema (standard) ----------
+   Semantiska namn enligt tidra-design-mork/tidra-tema.css, kompletterade med
+   de värden som designfilerna använder för accentknapp, utkast, inaktiva fält m.m. */
+:root {
+  color-scheme: light;
+  --white: #FFFFFF;
+  --bg: #F7F5F8;
+  --surface: #FFFFFF;
+  --surface-2: #FBFAFC;
+  --text: #0E1430;
+  --text-muted: #6B7089;
+  --border: #ECEAF1;
+  /* Mörkare än designguidens #D6D4E0 för att klara WCAG 1.4.11 (3:1 mot kort och sidbakgrund) */
+  --border-strong: #858AA3;
+  --primary: #1B2A5C;
+  --primary-hover: #14204A;
+  --on-primary: #FFFFFF;
+  --link: #1B2A5C;
+  --link-hover: #14204A;
+  --focus-border: #1B2A5C;
+  --sidebar: #1B2A5C;
+  --progress: #1B2A5C;
+  --accent: #FF9EB5;
+  --on-accent: #0E1430;
+  --accent-soft: #FFE6EC;
+  --on-accent-soft: #8A1F3D;
+  --accent-btn-bg: #FF9EB5;
+  --accent-btn-hover: #FF8AA6;
+  --accent-btn-text: #0E1430;
+  --accent-btn-border: transparent;
+  --info-soft: #ECEFF7;
+  --on-info-soft: #1B2A5C;
+  --danger: #B42336;
+  --danger-soft: #FDECEE;
+  --danger-btn: #B42336;
+  --danger-btn-hover: #9A1D2E;
+  --on-danger: #FFFFFF;
+  --draft-bg: #F0EFF4;
+  --draft-text: #50546B;
+  --disabled-bg: #E4E5EE;
+  --disabled-text: #8A8EA6;
+  --field-disabled-bg: #F7F5F8;
+  --field-disabled-text: #9A9DB2;
+  --stat-label: #4A4F68;
+  /* Statusfärger – förslag A (Salvia, honung & lavendel) */
+  --status-godkand-bg: #E3F4EA;
+  --status-godkand-text: #1E6B45;
+  --status-pagaende-bg: #FFF3CC;
+  --status-pagaende-text: #7D5300;
+  --status-avslutat-bg: #EEEAFB;
+  --status-avslutat-text: #5A3FAE;
+  --selected-bg: #1B2A5C;
+  --selected-text: #FFFFFF;
+  --selected-muted: rgba(255, 255, 255, 0.8);
+  --selected-dot: #FF9EB5;
+  --focus-ring: #FF9EB5;
+  --focus-ring-gap: #FFFFFF;
+  /* Marin inre ring i ljust tema – den rosa ringen ensam når inte 3:1 mot vitt */
+  --focus-ring-inner: #1B2A5C;
+  --auth-panel: #FFFFFF;
+  --backdrop: rgba(14, 20, 48, 0.45);
+  --shadow-float-color: rgba(14, 20, 48, 0.14);
+  /* Logotyp: vilken fil som visas på ljus sidbakgrund */
+  --logo-light-display: block;
+  --logo-dark-display: none;
+
+  /* Sidomeny och inloggningens vänsterdel är marin i båda temana */
+  --on-dark-muted: rgba(255, 255, 255, 0.7);
+  --on-dark-nav: rgba(255, 255, 255, 0.78);
+  --on-dark-line: rgba(255, 255, 255, 0.14);
+  --on-dark-border: rgba(255, 255, 255, 0.28);
+  --on-dark-active: rgba(255, 255, 255, 0.12);
+}
+
+/* ---------- Färger: mörkt tema ----------
+   Gäller när systemet är inställt på mörkt (om man inte valt ljust i Tidla),
+   eller när man valt mörkt med temaknappen (data-theme="dark" på <html>).
+   Blocken är identiska – ändra båda. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0B1024;
+    --surface: #141B36;
+    --surface-2: #1A2244;
+    --text: #F2F1F7;
+    --text-muted: #A3A8C3;
+    --border: #232B4D;
+    --border-strong: #606AA0;
+    --primary: #FF9EB5;
+    --primary-hover: #FFB8C8;
+    --on-primary: #0E1430;
+    --link: #B9C4F5;
+    --link-hover: #D5DCFA;
+    --focus-border: #B9C4F5;
+    --progress: #FF9EB5;
+    --accent-soft: #3A2342;
+    --on-accent-soft: #FFB8C8;
+    --accent-btn-bg: #3A2342;
+    --accent-btn-hover: #4A2C54;
+    --accent-btn-text: #FFB8C8;
+    --accent-btn-border: rgba(255, 158, 181, 0.35);
+    --info-soft: #1F2A55;
+    --on-info-soft: #B9C4F5;
+    --danger: #FF7A8A;
+    --danger-soft: #3B1A26;
+    --danger-btn: #D93A4E;
+    --danger-btn-hover: #C22F42;
+    --draft-bg: #262E52;
+    --draft-text: #C9CCE0;
+    --disabled-bg: #232B4D;
+    --disabled-text: #6F7596;
+    --field-disabled-bg: #0B1024;
+    --field-disabled-text: #6F7596;
+    --stat-label: #B6BBD6;
+    --status-godkand-bg: #173A2B;
+    --status-godkand-text: #7FE0AE;
+    --status-pagaende-bg: #3A3014;
+    --status-pagaende-text: #FFD166;
+    --status-avslutat-bg: #2A2450;
+    --status-avslutat-text: #C8BBFF;
+    --selected-bg: #FF9EB5;
+    --selected-text: #0E1430;
+    --selected-muted: rgba(14, 20, 48, 0.72);
+    --selected-dot: #0E1430;
+    --focus-ring-gap: #0B1024;
+    --focus-ring-inner: #FF9EB5;
+    --auth-panel: #0B1024;
+    --backdrop: rgba(3, 5, 15, 0.7);
+    --shadow-float-color: rgba(0, 0, 0, 0.45);
+    --logo-light-display: none;
+    --logo-dark-display: block;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0B1024;
+  --surface: #141B36;
+  --surface-2: #1A2244;
+  --text: #F2F1F7;
+  --text-muted: #A3A8C3;
+  --border: #232B4D;
+  --border-strong: #606AA0;
+  --primary: #FF9EB5;
+  --primary-hover: #FFB8C8;
+  --on-primary: #0E1430;
+  --link: #B9C4F5;
+  --link-hover: #D5DCFA;
+  --focus-border: #B9C4F5;
+  --progress: #FF9EB5;
+  --accent-soft: #3A2342;
+  --on-accent-soft: #FFB8C8;
+  --accent-btn-bg: #3A2342;
+  --accent-btn-hover: #4A2C54;
+  --accent-btn-text: #FFB8C8;
+  --accent-btn-border: rgba(255, 158, 181, 0.35);
+  --info-soft: #1F2A55;
+  --on-info-soft: #B9C4F5;
+  --danger: #FF7A8A;
+  --danger-soft: #3B1A26;
+  --danger-btn: #D93A4E;
+  --danger-btn-hover: #C22F42;
+  --draft-bg: #262E52;
+  --draft-text: #C9CCE0;
+  --disabled-bg: #232B4D;
+  --disabled-text: #6F7596;
+  --field-disabled-bg: #0B1024;
+  --field-disabled-text: #6F7596;
+  --stat-label: #B6BBD6;
+  --status-godkand-bg: #173A2B;
+  --status-godkand-text: #7FE0AE;
+  --status-pagaende-bg: #3A3014;
+  --status-pagaende-text: #FFD166;
+  --status-avslutat-bg: #2A2450;
+  --status-avslutat-text: #C8BBFF;
+  --selected-bg: #FF9EB5;
+  --selected-text: #0E1430;
+  --selected-muted: rgba(14, 20, 48, 0.72);
+  --selected-dot: #0E1430;
+  --focus-ring-gap: #0B1024;
+  --focus-ring-inner: #FF9EB5;
+  --auth-panel: #0B1024;
+  --backdrop: rgba(3, 5, 15, 0.7);
+  --shadow-float-color: rgba(0, 0, 0, 0.45);
+  --logo-light-display: none;
+  --logo-dark-display: block;
+}
+
+:root {
+
+  /* Typsnitt */
+  --font: "Plus Jakarta Sans", system-ui, sans-serif;
+  --fs-h1: 26px;          /* mobil; dator 40px nedan */
+  --fs-h2: 24px;
+  --fs-h3: 18px;
+  --fs-body: 15px;
+  --fs-small: 13px;
+  --fs-help: 12.5px;
+  --fs-label: 13px;
+  --fs-num: 26px;
+  --fs-row-value: 17px;
+  --ls-tight: -0.02em;
+
+  /* Radier */
+  --r-field: 12px;
+  --r-row: 14px;
+  --r-card: 16px;         /* mobil; dator 20px nedan */
+  --r-menu: 12px;
+  --r-pill: 999px;
+
+  /* Höjder */
+  --h-field: 48px;
+  --h-btn: 48px;
+  --h-btn-lg: 56px;       /* mobil; dator 52px nedan */
+  --h-stepper: 56px;      /* mobil; dator 48px nedan */
+  --h-pill: 26px;
+  --h-tap: 48px;          /* minsta tryckyta */
+  --h-tabbar: 64px;
+
+  /* Fält */
+  --field-border: 1.5px;
+  --field-icon-indent: 42px;
+
+  /* Fokus och skuggor */
+  --focus-field: 0 0 0 4px rgba(255, 158, 181, 0.45);
+  --focus-btn: 0 0 0 2px var(--focus-ring-gap), 0 0 0 4px var(--focus-ring-inner), 0 0 0 7px var(--focus-ring);
+  --shadow-card: 0 1px 2px rgba(14, 20, 48, 0.04);
+  --shadow-float: 0 8px 28px var(--shadow-float-color);
+
+  /* Luft */
+  --pad-card: 18px;       /* mobil; dator 24/28px nedan */
+  --pad-card-lg: 18px;
+  --gap-xs: 4px;
+  --gap-s: 8px;
+  --gap-m: 12px;
+  --gap-l: 18px;
+  --gap-xl: 24px;
+  --gap-xxl: 28px;
+
+  /* Layout */
+  --sidebar-w: 272px;
+  --aside-w: 380px;
+  --content-pad-y: 4px;
+  --content-pad-x: 20px;
+  --content-max: 1180px;
+}
+
+@media (min-width: 861px) {
+  :root {
+    --fs-h1: 40px;
+    --r-card: 20px;
+    --h-btn-lg: 52px;
+    --h-stepper: 48px;
+    --pad-card: 24px;
+    --pad-card-lg: 28px;
+    --content-pad-y: 44px;
+    --content-pad-x: 56px;
+  }
+}
+
+/* ---------- Bas ---------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+img,
+svg {
+  display: block;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--link);
+}
+
+a:hover {
+  color: var(--link-hover);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 100;
+  padding: 12px 16px;
+  border-radius: var(--r-field);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 12px;
+  color: var(--on-primary);
+  box-shadow: var(--focus-btn);
+  outline: none;
+}
+
+/* Tydlig fokus för tangentbord på allt klickbart */
+:where(a, button, [role="button"], summary, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-btn);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Typografi ---------- */
+
+.h1,
+.page-title {
+  font-size: var(--fs-h1);
+  font-weight: 800;
+  letter-spacing: var(--ls-tight);
+  line-height: 1.15;
+}
+
+.h2 {
+  font-size: var(--fs-h2);
+  font-weight: 800;
+  letter-spacing: var(--ls-tight);
+  line-height: 1.2;
+}
+
+.h3,
+.card__title {
+  font-size: var(--fs-h3);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.text-small {
+  font-size: var(--fs-small);
+}
+
+.text-help {
+  font-size: var(--fs-help);
+  color: var(--text-muted);
+}
+
+.text-error {
+  color: var(--danger);
+}
+
+.section-label {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ---------- Layouthjälp ---------- */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-l);
+}
+
+.stack--s { gap: var(--gap-s); }
+.stack--m { gap: var(--gap-m); }
+.stack--xl { gap: var(--gap-xl); }
+.stack--xxl { gap: var(--gap-xxl); }
+
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-m);
+}
+
+.split {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-m);
+}
+
+.split--center {
+  align-items: center;
+}
+
+/* I mobilen hamnar text och knappar på var sin rad */
+@media (max-width: 860px) {
+  .split--stack {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.grid-2,
+.grid-3 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--gap-l);
+}
+
+/* Två kolumner även i mobil (t.ex. Milersättning + Frånvaro) */
+.grid-2-always {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap-m);
+}
+
+@media (min-width: 861px) {
+  .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grid-2-always { gap: var(--gap-l); }
+  .span-all { grid-column: 1 / -1; }
+}
+
+/* ---------- Knappar ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--h-btn);
+  padding: 0 22px;
+  border: var(--field-border) solid transparent;
+  border-radius: var(--r-field);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn:hover {
+  color: var(--on-primary);
+}
+
+.btn--primary { background: var(--primary); color: var(--on-primary); }
+.btn--primary:hover { background: var(--primary-hover); }
+
+.btn--secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.btn--secondary:hover {
+  color: var(--text);
+  border-color: var(--focus-border);
+}
+
+.btn--accent {
+  background: var(--accent-btn-bg);
+  color: var(--accent-btn-text);
+  border-color: var(--accent-btn-border);
+}
+.btn--accent:hover { background: var(--accent-btn-hover); color: var(--accent-btn-text); }
+
+.btn--text {
+  background: transparent;
+  color: var(--link);
+  padding: 0 12px;
+}
+.btn--text:hover {
+  color: var(--link-hover);
+  background: var(--info-soft);
+}
+
+.btn--danger { background: var(--danger-btn); color: var(--on-danger); }
+.btn--danger:hover { background: var(--danger-btn-hover); color: var(--on-danger); }
+
+/* Mindre knapp i listrader – aldrig under 48px tryckyta i mobil */
+.btn--sm {
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+@media (min-width: 861px) {
+  .btn--sm { min-height: 40px; }
+}
+
+.btn--lg { min-height: var(--h-btn-lg); }
+.btn--block { width: 100%; }
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  background: var(--disabled-bg);
+  border-color: transparent;
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
+/* Fyrkantig ikonknapp (stepper, stäng, pilar) */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--h-tap);
+  height: var(--h-tap);
+  padding: 0;
+  border: var(--field-border) solid var(--border-strong);
+  border-radius: var(--r-field);
+  background: var(--surface);
+  color: var(--link);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  border-color: var(--focus-border);
+}
+
+.icon-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.icon-btn--ghost:hover {
+  border-color: transparent;
+  background: var(--info-soft);
+}
+
+.icon-btn:disabled {
+  color: var(--disabled-text);
+  background: var(--bg);
+  cursor: not-allowed;
+}
+
+/* ---------- Formulärfält ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.field__label,
+.label {
+  font-size: var(--fs-label);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.field__optional {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.field__control {
+  position: relative;
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  min-height: var(--h-field);
+  padding: 0 14px;
+  border: var(--field-border) solid var(--border-strong);
+  border-radius: var(--r-field);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+/* 16px i mobil så att iOS inte zoomar in vid fokus */
+@media (max-width: 860px) {
+  .input,
+  .select,
+  .textarea {
+    font-size: 16px;
+  }
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.textarea {
+  min-height: 88px;
+  padding: 12px 14px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 40px;
+  cursor: pointer;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--focus-border);
+  box-shadow: var(--focus-field);
+}
+
+.input:disabled,
+.select:disabled,
+.textarea:disabled {
+  background: var(--field-disabled-bg);
+  color: var(--field-disabled-text);
+  cursor: not-allowed;
+}
+
+.input[readonly] {
+  background: var(--bg);
+}
+
+.input--with-icon {
+  padding-left: var(--field-icon-indent);
+}
+
+.input--with-action {
+  padding-right: 48px;
+}
+
+.field__icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.field__chevron {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Knapp inne i fältet, t.ex. "Visa lösenord" – 48px tryckyta */
+.field__action {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--h-tap);
+  height: var(--h-field);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-field);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.field__action:hover {
+  color: var(--link);
+}
+
+.field__help {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-help);
+  color: var(--text-muted);
+}
+
+.field__error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-help);
+  color: var(--danger);
+}
+
+.field--error .input,
+.field--error .select,
+.field--error .textarea,
+.input[aria-invalid="true"],
+.select[aria-invalid="true"],
+.textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+/* Kryssruta med 48px tryckyta */
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--h-tap);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.check input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+/* outline i stället för box-shadow – Safari ritar inte skugga på kryssrutor */
+.check input:focus-visible {
+  outline: 3px solid var(--focus-ring-inner);
+  outline-offset: 2px;
+}
+
+/* Formulärfel överst i formulär */
+.form-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--r-field);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ---------- Timmar (−/+) ---------- */
+
+.stepper {
+  display: flex;
+  gap: 8px;
+}
+
+.stepper .icon-btn {
+  width: var(--h-stepper);
+  height: var(--h-stepper);
+}
+
+.stepper__input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--h-stepper);
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 861px) {
+  .stepper__input { font-size: 17px; }
+}
+
+/* ---------- Statuspiller ---------- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--h-pill);
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-help);
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--draft-bg);
+  color: var(--draft-text);
+}
+
+.pill--approved { background: var(--info-soft); color: var(--on-info-soft); }
+.pill--pending  { background: var(--accent-soft); color: var(--on-accent-soft); }
+.pill--rejected { background: var(--danger-soft); color: var(--danger); }
+.pill--draft    { background: var(--draft-bg); color: var(--draft-text); }
+.pill--success  { background: var(--status-godkand-bg); color: var(--status-godkand-text); }
+.pill--progress { background: var(--status-pagaende-bg); color: var(--status-pagaende-text); }
+.pill--done     { background: var(--status-avslutat-bg); color: var(--status-avslutat-text); }
+
+/* Räknare (t.ex. nya materialuttag) */
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Kort ---------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: var(--pad-card);
+  box-shadow: var(--shadow-card);
+}
+
+.card--lg {
+  padding: var(--pad-card-lg);
+}
+
+.card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-m);
+  margin-bottom: 16px;
+}
+
+/* Statistikrutor i "Dagens tid" */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--r-row);
+  background: var(--info-soft);
+}
+
+.stat--pink {
+  background: var(--accent-soft);
+}
+
+.stat__label {
+  font-size: var(--fs-help);
+  font-weight: 600;
+  color: var(--stat-label);
+}
+
+.stat__value {
+  font-size: var(--fs-num);
+  font-weight: 800;
+  letter-spacing: var(--ls-tight);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* Progressbar */
+.progress {
+  width: 100%;
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--info-soft);
+  overflow: hidden;
+}
+
+.progress__bar {
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--progress);
+  transition: width 0.25s;
+}
+
+/* ---------- Listrader ---------- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-row);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.row--muted {
+  background: var(--surface-2);
+}
+
+.row--wrap {
+  flex-wrap: wrap;
+}
+
+a.row:hover,
+button.row:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+button.row {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--info-soft);
+  color: var(--on-info-soft);
+}
+
+.row__icon--pink {
+  background: var(--accent-soft);
+  color: var(--on-accent-soft);
+}
+
+.row__icon--error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.row__title {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.row__meta {
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.row__note {
+  font-size: var(--fs-small);
+  color: var(--danger);
+}
+
+.row__aside {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.row__value {
+  font-size: var(--fs-row-value);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.row__arrow {
+  color: var(--link);
+  flex-shrink: 0;
+}
+
+/* Radens knappar hamnar på egen rad i mobil */
+.row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  padding-left: 54px;
+}
+
+/* I mobilen får texten hela bredden – piller och knappar hamnar på egna rader under */
+@media (max-width: 860px) {
+  .row--wrap .row__body {
+    flex: 1 1 calc(100% - 54px);
+  }
+
+  .row--wrap .row__aside {
+    flex-wrap: wrap;
+    padding-left: 54px;
+  }
+}
+
+@media (min-width: 861px) {
+  .row__actions {
+    width: auto;
+    padding-left: 0;
+  }
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--info-soft);
+  color: var(--on-info-soft);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.avatar--pink {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.avatar--lg {
+  width: 40px;
+  height: 40px;
+  font-size: 14px;
+}
+
+/* ---------- Tomt läge ---------- */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-row);
+  background: var(--surface);
+  text-align: center;
+}
+
+.empty__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--info-soft);
+  color: var(--on-info-soft);
+}
+
+.empty__title {
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.empty__text {
+  max-width: 360px;
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+}
+
+/* ---------- Sidhuvud ---------- */
+
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-l);
+}
+
+.page-head__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eyebrow {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--link);
+}
+
+.eyebrow::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.page-lead {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+@media (min-width: 861px) {
+  .page-head {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .page-head__text { gap: 8px; }
+  .eyebrow { display: flex; }
+  .page-lead { font-size: var(--fs-body); }
+}
+
+/* Datumväljare ‹ Idag · tor 24 sep › (dator) */
+.datenav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-row);
+  background: var(--surface);
+}
+
+.datenav .icon-btn {
+  border: 0;
+  background: transparent;
+}
+
+.datenav .icon-btn:hover {
+  background: var(--info-soft);
+}
+
+.datenav__label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: var(--h-tap);
+  padding: 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Osynligt datumfält ovanpå etiketten öppnar kalendern */
+.datenav__picker {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.datenav__label:focus-within {
+  border-radius: 10px;
+  box-shadow: var(--focus-btn);
+}
+
+/* ---------- Veckoremsa (mobil) ---------- */
+
+.weekstrip {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.weekstrip__days {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+}
+
+.weekstrip__nav {
+  width: 32px;
+  height: 72px;
+  border: 0;
+  background: transparent;
+}
+
+.weekstrip__day {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  height: 72px;
+  padding: 0;
+  border: var(--field-border) solid var(--border);
+  border-radius: var(--r-row);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.weekstrip__name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.weekstrip__date {
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.weekstrip__sum {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.weekstrip__dot {
+  width: 6px;
+  height: 6px;
+  margin: 4px 0;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.weekstrip__day[aria-pressed="true"] {
+  border-color: var(--selected-bg);
+  background: var(--selected-bg);
+  color: var(--selected-text);
+}
+
+.weekstrip__day[aria-pressed="true"] .weekstrip__name {
+  color: var(--selected-muted);
+}
+
+.weekstrip__day[aria-pressed="true"] .weekstrip__dot {
+  background: var(--selected-dot);
+}
+
+/* Kortet "Idag 4,0 av 8,5 h" (mobil) */
+.today-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.today-card__value {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Snabbval ---------- */
+
+.quick {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-row);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.quick:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+a.quick {
+  text-decoration: none;
+}
+
+.quick:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ---------- Skal: sidomeny, toppfält, flikmeny ---------- */
+
+.app {
+  min-height: 100vh;
+}
+
+.sidebar {
+  display: none;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 20px 16px;
+  background: var(--bg);
+}
+
+/* Logotypen är en länk hem – 48px tryckyta */
+.topbar__home {
+  display: flex;
+  align-items: center;
+  min-height: var(--h-tap);
+}
+
+.topbar__logo {
+  height: 22px;
+  width: auto;
+}
+
+/* 38px avatar med 48px tryckyta */
+.topbar__avatar {
+  margin: -5px;
+  padding: 5px;
+  border-radius: 50%;
+  text-decoration: none;
+}
+
+.main {
+  padding: var(--content-pad-y) var(--content-pad-x) calc(var(--h-tabbar) + 40px);
+}
+
+.main__inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-l);
+  max-width: var(--content-max);
+}
+
+.main:focus {
+  outline: none;
+}
+
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  padding: 0 8px env(safe-area-inset-bottom, 0);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.tabbar__link {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: var(--h-tabbar);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.tabbar__link:hover {
+  color: var(--link);
+}
+
+.tabbar__link[aria-current="page"] {
+  color: var(--link);
+  font-weight: 800;
+}
+
+.tabbar__link[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  width: 32px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+
+.tabbar__badge {
+  position: absolute;
+  top: 13px;
+  left: calc(50% + 4px);
+  min-width: 18px;
+  height: 18px;
+  font-size: 11px;
+}
+
+@media (min-width: 861px) {
+  .app {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  }
+
+  .topbar,
+  .tabbar {
+    display: none;
+  }
+
+  .main {
+    padding: var(--content-pad-y) var(--content-pad-x);
+  }
+
+  .main__inner {
+    gap: var(--gap-xxl);
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    height: 100vh;
+    padding: 28px 18px;
+    overflow-y: auto;
+    background: var(--sidebar);
+    color: var(--white);
+  }
+}
+
+.sidebar__brand {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 8px;
+}
+
+.sidebar__logo {
+  height: 26px;
+  width: auto;
+}
+
+.sidebar__company {
+  padding-left: 35px;
+  font-size: var(--fs-small);
+  color: var(--on-dark-muted);
+  overflow-wrap: anywhere;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav__link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--h-tap);
+  padding: 0 14px;
+  border-radius: var(--r-menu);
+  color: var(--on-dark-nav);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.nav__link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--white);
+}
+
+.nav__link[aria-current="page"] {
+  background: var(--on-dark-active);
+  color: var(--white);
+  font-weight: 700;
+}
+
+.nav__dot {
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.nav__link .count-badge {
+  margin-left: auto;
+}
+
+.nav__link[aria-current="page"] .count-badge + .nav__dot {
+  margin-left: 8px;
+}
+
+.sidebar__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: auto;
+  padding-top: 18px;
+  border-top: 1px solid var(--on-dark-line);
+}
+
+.sidebar__user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--h-tap);
+  padding: 4px 6px;
+  border-radius: var(--r-menu);
+  color: var(--white);
+  text-decoration: none;
+}
+
+.sidebar__user:hover,
+.sidebar__user[aria-current="page"] {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--white);
+}
+
+.sidebar__user-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sidebar__user-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sidebar__user-title {
+  font-size: var(--fs-help);
+  color: var(--on-dark-muted);
+}
+
+.sidebar__logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--h-tap);
+  border: var(--field-border) solid var(--on-dark-border);
+  border-radius: var(--r-field);
+  background: transparent;
+  color: var(--white);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sidebar__logout:hover {
+  border-color: var(--white);
+}
+
+/* Temaknapp i sidomenyn: text + reglage */
+.sidebar__theme {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: var(--h-tap);
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-menu);
+  background: transparent;
+  color: var(--on-dark-nav);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar__theme:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--white);
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  margin-left: auto;
+  border-radius: var(--r-pill);
+  background: var(--on-dark-border);
+  transition: background-color 0.15s;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--white);
+  transition: transform 0.15s;
+}
+
+[aria-pressed="true"] > .switch {
+  background: var(--accent);
+}
+
+[aria-pressed="true"] > .switch::after {
+  background: var(--sidebar);
+  transform: translateX(16px);
+}
+
+/* Temaknapp i mobilens toppfält och på sidor utan meny */
+.theme-toggle {
+  color: var(--link);
+}
+
+.theme-toggle--floating {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 30;
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.theme-toggle--floating:hover {
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Logotyp på sidbakgrund: marin symbol i ljust tema, rosa i mörkt */
+.logo--on-light { display: var(--logo-light-display); }
+.logo--on-dark { display: var(--logo-dark-display); }
+
+.segmented__inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------- Tidrapportens layout ---------- */
+
+.time-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-l);
+}
+
+.time-layout__main,
+.time-layout__aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-l);
+  min-width: 0;
+}
+
+@media (min-width: 1200px) {
+  .time-layout {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--gap-xl);
+  }
+
+  .time-layout__main {
+    flex: 1;
+    gap: var(--gap-xxl);
+  }
+
+  .time-layout__aside {
+    width: var(--aside-w);
+    flex-shrink: 0;
+    gap: 20px;
+  }
+}
+
+/* Visa bara i mobil / bara på dator */
+@media (max-width: 860px) {
+  .only-desktop { display: none !important; }
+}
+
+@media (min-width: 861px) {
+  .only-mobile { display: none !important; }
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+@media (max-width: 860px) {
+  .form__actions--stack {
+    flex-direction: column;
+  }
+
+  .form__actions--stack .btn {
+    width: 100%;
+  }
+}
+
+/* ---------- Tidrapport ---------- */
+
+/* Rutnät som fyller raden med så många fält som får plats (Frånvaro, Fordon, Grund, km) */
+.grid-auto {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--gap-m);
+}
+
+@media (min-width: 861px) {
+  .grid-auto {
+    gap: var(--gap-l);
+  }
+}
+
+.cluster--tight {
+  gap: var(--gap-s);
+  flex-wrap: nowrap;
+}
+
+/* Mobil: "‹ Vecka 39 · Närke Bygg ›  Välj datum" */
+.week-head {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0 4px;
+  margin-left: -12px;
+}
+
+/* Långa företagsnamn kortas med … så att "Välj datum" stannar på samma rad */
+.week-head__label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-head__pick {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.list-heading {
+  font-size: var(--fs-h3);
+  font-weight: 800;
+}
+
+@media (max-width: 860px) {
+  .list-heading {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+}
+
+/* Datumfält som visar "Torsdag 24 september" – kalendern ligger osynlig ovanpå */
+.date-field__text {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.date-field__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.date-field:focus-within .date-field__text {
+  border-color: var(--focus-border);
+  box-shadow: var(--focus-field);
+}
+
+/* Små ikonknappar i en rad (Redigera, Ta bort) */
+.row__tools {
+  display: flex;
+  gap: 2px;
+  margin-right: -8px;
+}
+
+.icon-btn--danger {
+  color: var(--danger);
+}
+
+.icon-btn--danger:hover {
+  background: var(--danger-soft);
+}
+
+@media (max-width: 860px) {
+  .row--wrap .row__tools {
+    margin-left: auto;
+  }
+}
+
+/* Resa: restid och milersättning i en egen del som fälls ut */
+.trip {
+  border: 1px solid var(--border);
+  border-radius: var(--r-row);
+  background: var(--surface);
+}
+
+.trip__toggle {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--r-row);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Rad i formuläret som öppnar något (t.ex. Lägg till material) */
+.trip__toggle.form-row-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.form-row-button:hover,
+.trip__toggle:hover {
+  background: var(--surface-2);
+}
+
+.trip__chevron {
+  color: var(--link);
+  transition: transform 0.15s;
+}
+
+.trip--open .trip__chevron {
+  transform: rotate(180deg);
+}
+
+.trip__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-l);
+  padding: 4px 16px 18px;
+}
+
+/* Tidrapporten: Arbetstid, Resa och Material är egna kort med en gemensam Spara-knapp under */
+.time-form .trip {
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+}
+
+.time-form .trip__toggle {
+  min-height: 72px;
+  padding: 12px var(--pad-card);
+  border-radius: var(--r-card);
+}
+
+.time-form .trip__body {
+  padding: 4px var(--pad-card) var(--pad-card);
+}
+
+/* "2,0 h över schemat – spara som övertid?" */
+.overtime-hint {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 12px 14px;
+  border-radius: var(--r-row);
+  background: var(--status-pagaende-bg);
+  color: var(--status-pagaende-text);
+  font-size: 14px;
+}
+
+.overtime-hint svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.overtime-hint .btn--secondary {
+  color: var(--text);
+}
+
+.row--editing {
+  border-color: var(--focus-border);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* ---------- Verktygsrad och filter ---------- */
+
+/* Sök tar mest plats, filtren delar på resten – i mobilen två filter per rad */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--gap-m);
+}
+
+.toolbar > .field {
+  flex: 1 1 140px;
+}
+
+.toolbar > .field:first-child {
+  flex: 2 1 100%;
+}
+
+@media (min-width: 861px) {
+  .toolbar > .field {
+    flex: 1 1 180px;
+  }
+
+  .toolbar > .field:first-child {
+    flex: 2 1 300px;
+  }
+}
+
+/* Segmenterad kontroll (flikar inom en vy) */
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--r-row);
+  background: var(--info-soft);
+  overflow-x: auto;
+}
+
+.segmented__btn {
+  flex: 1 0 auto;
+  min-height: var(--h-tap);
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--link);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.segmented__btn[aria-pressed="true"],
+.segmented__btn[aria-selected="true"] {
+  background: var(--surface);
+  font-weight: 800;
+  box-shadow: var(--shadow-card);
+}
+
+.toolbar__check {
+  flex: 0 0 auto;
+}
+
+/* Extra knappar i dialoger (Arkivera, Ta bort) hamnar till vänster */
+.dialog__extra {
+  margin-right: auto;
+}
+
+.btn--text-danger {
+  color: var(--danger);
+}
+
+.btn--text-danger:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+@media (max-width: 860px) {
+  .page-head__actions .btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* Val med förklaring under (radioknappar och kryssrutor i Inställningar) */
+.radio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Ett val: rutan, etiketten och en förklaring under (förklaringen är inte en del av namnet) */
+.choice {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+  padding: 6px 0;
+}
+
+.choice input {
+  width: 20px;
+  height: 20px;
+  margin: 14px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.choice input:focus-visible {
+  outline: 3px solid var(--focus-ring-inner);
+  outline-offset: 2px;
+}
+
+.choice label {
+  display: flex;
+  align-items: center;
+  min-height: var(--h-tap);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.choice__help {
+  grid-column: 2;
+  margin-top: -10px;
+  font-size: var(--fs-help);
+  color: var(--text-muted);
+}
+
+.choice input:disabled + label {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.radio-list--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0 20px;
+}
+
+.settings-grid {
+  align-items: start;
+}
+
+/* ---------- Granskning ---------- */
+
+.stats--four {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 861px) {
+  .stats--four {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.person__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 14px;
+}
+
+.person__title {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.person__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.week {
+  border: 1px solid var(--border);
+  border-radius: var(--r-row);
+  background: var(--surface);
+}
+
+.week__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-right: 12px;
+}
+
+.week__toggle {
+  display: flex;
+  flex: 1 1 280px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: 56px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--r-row);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.week__toggle:disabled {
+  cursor: default;
+}
+
+.week__name {
+  font-weight: 700;
+}
+
+.week__sum {
+  margin-left: auto;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.week--open .trip__chevron {
+  transform: rotate(180deg);
+}
+
+.week__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 0 8px 14px;
+}
+
+@media (min-width: 861px) {
+  .week__actions {
+    padding: 0;
+  }
+}
+
+.week__rows {
+  padding: 0 12px 12px;
+}
+
+.week__rows .row {
+  background: var(--surface-2);
+}
+
+.table__title {
+  display: block;
+  font-weight: 700;
+}
+
+.table th[scope="row"] {
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+
+/* Innehållslista överst på Inställningar */
+.settings-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Filknapp: själva filfältet är osynligt men går att nå med tangentbordet */
+.file-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.file-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-button:focus-within {
+  box-shadow: var(--focus-btn);
+}
+
+/* Filter som delar lika på bredden */
+@media (min-width: 861px) {
+  .toolbar--even > .field,
+  .toolbar--even > .field:first-child {
+    flex: 1 1 160px;
+  }
+}
+
+/* ---------- Tabell (summeringar) ---------- */
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table th,
+.table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.table th {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.table td.num,
+.table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.table tr:last-child td {
+  border-bottom: 0;
+}
+
+.deviation {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/* Nyckel–värde (profil m.m.) */
+.kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.kv dt {
+  color: var(--text-muted);
+}
+
+.kv dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Engångslösenord som visas en gång */
+.secret {
+  padding: 14px 16px;
+  border-radius: var(--r-field);
+  background: var(--info-soft);
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
+
+/* ---------- Kom igång ---------- */
+
+.guide {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guide__step,
+.guide__optional {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-row);
+  background: var(--surface);
+}
+
+.guide__step--current {
+  border-color: var(--focus-border);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.guide__optional {
+  border-style: dashed;
+}
+
+.guide__marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--info-soft);
+  color: var(--on-info-soft);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.guide__step--done .guide__marker {
+  background: var(--status-godkand-bg);
+  color: var(--status-godkand-text);
+}
+
+.guide__step--current .guide__marker {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.guide__marker--todo {
+  background: var(--accent-soft);
+  color: var(--on-accent-soft);
+}
+
+.guide__marker--optional {
+  background: var(--draft-bg);
+  color: var(--draft-text);
+}
+
+.guide__body {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.guide__title {
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.guide__step--done .guide__title {
+  color: var(--text-muted);
+}
+
+.guide__text {
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+}
+
+/* I mobilen hamnar knappen på egen rad under texten */
+.guide__action {
+  margin-left: 50px;
+}
+
+@media (min-width: 861px) {
+  .guide__step,
+  .guide__optional {
+    align-items: center;
+  }
+
+  .guide__action {
+    margin-left: auto;
+  }
+}
+
+.numbered {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 22px;
+  font-size: 14px;
+}
+
+.info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.info-list li {
+  display: flex;
+  gap: 10px;
+}
+
+.info-list svg,
+.info-list .pill {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--link);
+}
+
+/* Informationsruta */
+.callout {
+  display: flex;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--r-row);
+  background: var(--info-soft);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.callout--pink {
+  background: var(--accent-soft);
+  color: var(--on-accent-soft);
+}
+
+.callout--error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.callout a {
+  color: inherit;
+  font-weight: 700;
+}
+
+/* Knappar i informationsrutor får radbrytas på smala skärmar */
+.callout .btn {
+  white-space: normal;
+  text-align: left;
+}
+
+.callout svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ---------- Inloggning ---------- */
+
+.auth {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--auth-panel);
+}
+
+.auth__hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 56px 24px 36px;
+  overflow: hidden;
+  border-radius: 0 0 28px 28px;
+  background: var(--sidebar);
+  color: var(--white);
+}
+
+.auth__logo {
+  position: relative;
+  align-self: flex-start;
+  height: 26px;
+  width: auto;
+}
+
+.auth__headline {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+}
+
+.auth__copy,
+.auth__mark {
+  display: none;
+}
+
+.auth__middle {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Ingress och taggar visas även i mobilen, lite mindre */
+.auth__lead {
+  max-width: 420px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--on-dark-nav);
+}
+
+.auth__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip-on-dark svg {
+  color: var(--accent);
+}
+
+.auth__panel {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  padding: 32px 24px 48px;
+}
+
+.auth__box {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.auth__title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: var(--ls-tight);
+  line-height: 1.15;
+}
+
+.auth__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.auth__intro {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth__subtitle {
+  font-size: var(--fs-body);
+  color: var(--text-muted);
+}
+
+.auth__form {
+  gap: 18px;
+}
+
+/* Knapp som ser ut som en länk, t.ex. "Glömt lösenord?" – 48px tryckyta */
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--h-tap);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+
+.auth__footnote {
+  font-size: 14px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ---------- Testversionen: exempelföretag och raden överst ---------- */
+
+.demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-l);
+}
+
+.demo__title {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.demo__lead,
+.demo__note {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.demo__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.demo__company {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-row);
+  background: var(--surface);
+}
+
+.demo__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.demo__name {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.demo__branch,
+.demo__text {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.demo__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.demo__actions .btn {
+  flex: 1 1 auto;
+}
+
+.demo__logins summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--link);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.demo__logins ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.demo__logins li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+
+.demo__email {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.demo-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px 10px;
+  max-width: var(--content-max);
+  margin-bottom: var(--gap-l);
+  padding: 4px 14px;
+  border-radius: var(--r-row);
+  background: var(--info-soft);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.demo-bar svg {
+  flex-shrink: 0;
+  color: var(--link);
+}
+
+.demo-bar > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.demo-bar .link-btn {
+  flex-shrink: 0;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.chip-on-dark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--white);
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+
+@media (min-width: 861px) {
+  .auth {
+    flex-direction: row;
+  }
+
+  .auth__hero {
+    justify-content: space-between;
+    width: min(620px, 43vw);
+    flex-shrink: 0;
+    min-height: 100vh;
+    padding: 56px 64px;
+    border-radius: 0;
+  }
+
+  .auth__logo { height: 34px; }
+
+  .auth__headline { font-size: 46px; }
+
+  .auth__lead {
+    font-size: 17px;
+    line-height: 1.55;
+  }
+
+  .auth__chips {
+    gap: 10px;
+  }
+
+  .auth__copy {
+    display: block;
+    position: relative;
+    font-size: var(--fs-small);
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  /* Stor bock i cirkel som sticker ut nere till höger */
+  .auth__mark {
+    display: block;
+    position: absolute;
+    right: -170px;
+    bottom: -150px;
+    width: 560px;
+    height: 560px;
+    color: var(--white);
+    opacity: 0.09;
+    pointer-events: none;
+  }
+
+  .auth__middle {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .auth__panel {
+    align-items: center;
+    padding: 40px;
+  }
+
+  .auth__title { font-size: 32px; }
+}
+
+/* Stegindikator i första start-guiden */
+.steps {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.steps__item {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--border);
+}
+
+.steps__item--done,
+.steps__item[aria-current="step"] {
+  background: var(--primary);
+}
+
+.fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fieldset > legend {
+  margin-bottom: 7px;
+  padding: 0;
+}
+
+/* Schema per veckodag */
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+}
+
+.week-grid .input {
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Dialog ---------- */
+
+.dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-float);
+}
+
+.dialog--wide {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.dialog::backdrop {
+  background: var(--backdrop);
+}
+
+.dialog__inner {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: var(--pad-card-lg);
+}
+
+.dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialog__title {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.dialog__head .icon-btn {
+  margin: -10px -10px 0 0;
+}
+
+.dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-size: var(--fs-body);
+}
+
+.dialog__actions {
+  display: flex;
+  flex-wrap: wrap-reverse;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+@media (max-width: 860px) {
+  .dialog {
+    width: 100vw;
+    max-width: 100vw;
+    margin: auto 0 0;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .dialog__actions .btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* ---------- Diskret bekräftelse (ersätter prototypens toast) ---------- */
+
+.notice-region {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--h-tabbar) + 16px + env(safe-area-inset-bottom, 0));
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-row);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: var(--shadow-float);
+  animation: notice-in 0.2s ease-out;
+}
+
+.notice__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--info-soft);
+  color: var(--on-info-soft);
+  flex-shrink: 0;
+}
+
+/* Bekräftelse med knapp – klickbar trots att området annars släpper igenom klick */
+.notice--action {
+  pointer-events: auto;
+  flex-wrap: wrap;
+}
+
+.notice__action {
+  min-height: var(--h-tap);
+  margin-left: 4px;
+}
+
+.notice--error .notice__icon {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.notice--leaving {
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+@keyframes notice-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (min-width: 861px) {
+  .notice-region {
+    left: auto;
+    right: 32px;
+    bottom: 32px;
+    align-items: flex-end;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ---------- Startskärm under laddning ---------- */
+
+.boot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.boot img {
+  height: 32px;
+  width: auto;
+}
+
+/* ---------- Stilguide (utvecklarsida) ---------- */
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 12px;
+}
+
+.swatch {
+  display: flex;
+  align-items: flex-end;
+  height: 72px;
+  padding: 10px 12px;
+  border: 1px solid rgba(14, 20, 48, 0.08);
+  border-radius: var(--r-row);
+  font-size: 12px;
+  font-weight: 700;
+}

@@ -1,0 +1,17 @@
+{
+  "name": "tidla",
+  "private": true,
+  "type": "module",
+  "description": "Tidla – tidrapportering. Inget byggsteg; package.json finns bara för testerna.",
+  "scripts": {
+    "test": "node tests/store.test.mjs && node tests/export.test.mjs && node tests/demo.test.mjs && node tests/contrast.test.mjs",
+    "test:store": "node tests/store.test.mjs",
+    "test:contrast": "node tests/contrast.test.mjs",
+    "test:browser": "node tests/browser.test.mjs",
+    "test:demo": "node tests/demo.test.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "playwright": "^1.63.0"
+  }
+}
