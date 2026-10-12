@@ -1,7 +1,7 @@
 {
   "name": "Tidla",
   "short_name": "Tidla",
-  "description": "Tidrapportering för småföretag",
+  "description": "Tidrapportering för byggföretag",
   "lang": "sv",
   "start_url": "./#/tid",
   "scope": "./",

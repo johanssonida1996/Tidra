@@ -126,8 +126,12 @@ await test("första start skapar företag och admin och loggar in", async () => 
   assert.equal(settings.timeTypes[0].name, "Arbete");
   assert.deepEqual(settings.overtime, { mode: "both", factor: null });
   assert.deepEqual(settings.travel, { enabled: true, billableDefault: false, employeeCanChangeBilling: true, countsTowardSchedule: false });
-  assert.equal(settings.vehicleTypes.length, 6);
-  assert.ok(settings.vehicleTypes.every((v) => v.ratePerMil === null));
+  // Bara firmabil och privat bil syns – beloppen är Skatteverkets förval
+  assert.deepEqual(settings.vehicleTypes.filter((v) => !v.hidden).map((v) => v.id), ["firmabil", "privat-bil"]);
+  assert.deepEqual(settings.vehicleTypes.map((v) => [v.id, v.ratePerMil]), [
+    ["firmabil", null], ["privat-bil", 25], ["forman", 12], ["forman-el", 9.5], ["motorcykel", null],
+  ]);
+  assert.ok(settings.vehicleTypes.filter((v) => v.ratePerMil !== null).every((v) => v.rateYear === store.VEHICLE_RATES.year && !v.rateCustom));
   assert.equal(local.getItem("tidla:schema"), "1");
   await rejects(store.completeSetup({ companyName: "Igen", admin: { name: "X", email: "x@y.se", password: "12345678" } }), "invalid-state");
 });
@@ -384,6 +388,7 @@ await test("export och import av säkerhetskopia", async () => {
 await test("gallring räknar och raderar gamla tidrader", async () => {
   const count = await store.countEntriesBefore("2026-09-24");
   assert.equal(count.entries, 1);
+  assert.equal(count.materials, 0, "Materialet är från 24 september och ska vara kvar");
   assert.equal(count.oldest, "2026-09-23");
   const result = await store.purgeEntriesBefore("2026-09-24");
   assert.equal(result.entries, 1);
@@ -532,28 +537,27 @@ await test("restid och övertid som egna typer flyttas till den nya modellen", a
 
 console.log("Material");
 
-await test("material: benämning, artikellista, förslag per bransch och fritext", async () => {
+await test("material: benämning, artikellista, förslag för bygg och fritext", async () => {
   await store.logout();
   await store.login("anna@example.se", "hemligt123");
-  await store.saveSettings({ materials: { enabled: true, label: "Produkter", allowFreeText: false } });
-  assert.equal((await store.getSettings()).materials.label, "Produkter");
+  await store.saveSettings({ materials: { enabled: true, label: "Förbrukning", allowFreeText: false } });
+  assert.equal((await store.getSettings()).materials.label, "Förbrukning");
   await rejects(store.saveSettings({ materials: { enabled: true, label: "" } }), "validation");
 
-  const added = await store.addArticleTemplate("frisor");
-  assert.equal(added, 7);
-  assert.equal(await store.addArticleTemplate("frisor"), 0, "Samma förslag ska inte läggas till två gånger");
-  await rejects(store.addArticleTemplate("okand"), "validation");
-  const color = (await store.listArticles()).find((a) => a.name === "Hårfärg");
+  const added = await store.addArticleTemplate();
+  assert.equal(added, store.ARTICLE_TEMPLATE.length);
+  assert.equal(await store.addArticleTemplate(), 0, "Samma förslag ska inte läggas till två gånger");
+  const color = (await store.listArticles()).find((a) => a.name === "Fogmassa");
   assert.equal(color.unit, "tub");
-  await rejects(store.saveArticle({ name: "hårfärg", unit: "tub" }), "duplicate");
-  const own = await store.saveArticle({ name: "Toner", unit: "ml", articleNo: "T-1" });
+  await rejects(store.saveArticle({ name: "fogmassa", unit: "tub" }), "duplicate");
+  const own = await store.saveArticle({ name: "Silikon", unit: "tub", articleNo: "S-1" });
   await store.saveArticle({ ...own, hidden: true });
   assert.equal((await store.listArticles()).some((a) => a.id === own.id), false);
   assert.equal((await store.listArticles({ includeHidden: true })).some((a) => a.id === own.id), true);
 
   const [p] = await store.listProjects({ selectableOnly: true });
   const item = await store.saveMaterial({ date: "2026-10-01", articleId: color.id, quantity: 2, projectId: p.id });
-  assert.equal(item.name, "Hårfärg");
+  assert.equal(item.name, "Fogmassa");
   assert.equal(item.unit, "tub");
   await rejects(store.saveMaterial({ date: "2026-10-01", articleId: own.id, quantity: 1, projectId: p.id }), "validation");
   // Fritext är avstängt
@@ -563,7 +567,7 @@ await test("material: benämning, artikellista, förslag per bransch och fritext
   await store.setMaterialsHandled([item.id]);
   assert.equal(await store.countNewMaterials(), before - 1);
   await rejects(store.deleteMaterial(item.id), "locked");
-  await store.saveSettings({ materials: { enabled: false, label: "Produkter", allowFreeText: false } });
+  await store.saveSettings({ materials: { enabled: false, label: "Förbrukning", allowFreeText: false } });
   assert.equal(await store.countNewMaterials(), 0, "Ingen räknare när funktionen är av");
   await store.saveSettings({ materials: { enabled: true, label: "Material", allowFreeText: true } });
 });
@@ -578,6 +582,161 @@ await test("gamla uttag med fritext flyttas till namn, antal och enhet", async (
   const migrated = JSON.parse(local.getItem("tidla:materials"));
   assert.deepEqual(migrated.map((m) => [m.name, m.quantity, m.unit]), [["Skruv", 2.5, "kg"], ["Lister", 1, "några"]]);
   local.setItem("tidla:materials", saved);
+});
+
+console.log("Utan projekt");
+
+await test("admin kan stänga av projekt – då rapporteras tid och material på kunden", async () => {
+  await store.logout();
+  await store.login("anna@example.se", "hemligt123");
+  assert.equal((await store.getSettings()).projects.enabled, true, "Projekt används som standard");
+  const second = await store.saveCustomer({ customerNo: "200", name: "Kund Två" });
+  const archived = await store.saveCustomer({ customerNo: "201", name: "Arkiverad" });
+  await store.setCustomerArchived(archived.id, true);
+  // Majas lösenord återställdes i ett tidigare test
+  const { oneTimePassword } = await store.resetPassword(employee.id);
+
+  // En rad på projekt innan projekten stängs av
+  await store.logout();
+  await store.login("maja@example.se", oneTimePassword);
+  await store.changePassword({ newPassword: "nyttlosen1" });
+  await rejects(store.saveSettings({ projects: { enabled: false } }), "forbidden");
+  const old = await store.saveEntry({ date: "2026-10-05", hours: 2, projectId: project.id });
+
+  await store.logout();
+  await store.login("anna@example.se", "hemligt123");
+  await store.saveSettings({ projects: { enabled: false } });
+  assert.equal((await store.getSettings()).projects.enabled, false);
+
+  await store.logout();
+  await store.login("maja@example.se", "nyttlosen1");
+  await assert.rejects(store.saveEntry({ date: "2026-10-06", hours: 4 }), (e) => e.code === "validation" && "customerId" in e.fields);
+  await rejects(store.saveEntry({ date: "2026-10-06", hours: 4, customerId: archived.id }), "validation");
+  const direct = await store.saveEntry({ date: "2026-10-06", hours: 4, customerId: second.id, projectId: project.id });
+  assert.equal(direct.customerId, second.id);
+  assert.equal(direct.projectId, null, "Projekt sparas inte när projekt är avstängt");
+  const absence = await store.saveEntry({ date: "2026-10-07", hours: 8, timeTypeId: "sjuk", customerId: second.id });
+  assert.equal(absence.customerId, null, "Frånvaro har ingen kund");
+  // En äldre rad på samma kund behåller sitt projekt
+  const edited = await store.saveEntry({ ...old, hours: 3, customerId: customer.id });
+  assert.equal(edited.projectId, project.id);
+  assert.equal(edited.customerId, null);
+
+  await rejects(store.saveMaterial({ date: "2026-10-06", name: "Skruv", unit: "kg", quantity: 1 }), "validation");
+  const material = await store.saveMaterial({ date: "2026-10-06", name: "Skruv", unit: "kg", quantity: 1, customerId: second.id });
+  assert.equal(material.customerId, second.id);
+  assert.equal(material.projectId, null);
+
+  await store.logout();
+  await store.login("anna@example.se", "hemligt123");
+  // Kundfiltret hittar både rader på kundens projekt och rader direkt på kunden
+  assert.deepEqual((await store.listEntries({ customerId: second.id })).map((e) => e.id), [direct.id]);
+  assert.equal((await store.listEntries({ customerId: customer.id })).some((e) => e.id === edited.id), true);
+  assert.deepEqual((await store.listMaterials({ customerId: second.id })).map((m) => m.id), [material.id]);
+  await rejects(store.deleteCustomer(second.id), "in-use");
+  await store.deleteCustomer(archived.id);
+
+  await store.saveSettings({ projects: { enabled: true } });
+});
+
+console.log("Frånvaro för flera dagar");
+
+await test("frånvaro från–till: en rad per arbetsdag enligt schemat, dagar med tid hoppas över", async () => {
+  await store.logout();
+  await store.login("maja@example.se", "nyttlosen1");
+  await store.saveEntry({ date: "2026-10-13", hours: 3, timeTypeId: "sjuk" });
+  await rejects(store.saveAbsenceRange({ from: "2026-10-16", to: "2026-10-12", timeTypeId: "semester" }), "validation");
+  await rejects(store.saveAbsenceRange({ from: "2026-10-12", to: "2026-10-16", timeTypeId: "normal" }), "validation");
+  await rejects(store.saveAbsenceRange({ from: "2026-10-17", to: "2026-10-18", timeTypeId: "semester" }), "validation");
+
+  // Mån 12 – sön 18 okt: mån–tor 8 h, fre 6 h enligt schemat, tisdagen har redan tid
+  const { saved, skipped } = await store.saveAbsenceRange({ from: "2026-10-12", to: "2026-10-18", timeTypeId: "semester", comment: "Höstlov" });
+  assert.deepEqual(saved.map((e) => [e.date, e.hours]), [["2026-10-12", 8], ["2026-10-14", 8], ["2026-10-15", 8], ["2026-10-16", 6]]);
+  assert.deepEqual(skipped, ["2026-10-13"]);
+  assert.ok(saved.every((e) => e.status === "draft" && e.projectId === null && e.comment === "Höstlov"));
+  await rejects(store.saveAbsenceRange({ from: "2026-10-12", to: "2026-10-16", timeTypeId: "semester" }), "validation");
+  await store.logout();
+  await store.login("anna@example.se", "hemligt123");
+});
+
+await test("ny typ som arbetstid utan kund och projekt (t.ex. kurs)", async () => {
+  const types = await store.saveTimeType({ name: "Kurs", category: "work" });
+  const kurs = types.find((t) => t.name === "Kurs");
+  assert.deepEqual([kurs.category, kurs.placeless], ["work", true]);
+  const saved = await store.saveEntry({ date: "2026-10-20", hours: 4, timeTypeId: kurs.id, projectId: project.id });
+  assert.equal(saved.projectId, null, "Kurs ska inte ha något projekt");
+  // Till skillnad från grundtypen Arbete går den att dölja
+  await store.saveTimeType({ id: kurs.id, name: "Kurs", hidden: true });
+  await rejects(store.saveTimeType({ id: "normal", name: "Arbete", hidden: true }), "validation");
+});
+
+await test("eget schema gäller från ett datum – äldre veckor behåller schemat som gällde då", async () => {
+  const maja = await store.getUser(employee.id);
+  assert.equal(await store.getScheduledHours("2026-09-25", maja.id), 6, "Företagets fredag är 6 h");
+  // Ledig på fredagar från och med 1 oktober
+  const week = { mon: 8, tue: 8, wed: 8, thu: 8, fri: 0, sat: 0, sun: 0 };
+  await store.saveUser({ ...maja, schedule: week, scheduleFrom: "2026-10-01" });
+  assert.equal(await store.getScheduledHours("2026-09-25", maja.id), 6, "Gamla fredagar ska inte ändras");
+  assert.equal(await store.getScheduledHours("2026-10-02", maja.id), 0);
+  // Tillbaka till företagets arbetstid från 1 november
+  await store.saveUser({ ...(await store.getUser(maja.id)), schedule: null, scheduleFrom: "2026-11-01" });
+  assert.equal(await store.getScheduledHours("2026-10-09", maja.id), 0);
+  assert.equal(await store.getScheduledHours("2026-11-06", maja.id), 6);
+  const periods = (await store.getUser(maja.id)).schedulePeriods;
+  assert.deepEqual(periods.map((p) => [p.from, Boolean(p.week)]), [["2026-10-01", true], ["2026-11-01", false]]);
+});
+
+console.log("Fordon och milersättning");
+
+await test("milersättning: eget belopp skrivs aldrig över, samma som förvalet följer förvalet", async () => {
+  await rejects(store.saveVehicleRates({ "privat-bil": -1 }), "validation");
+  let types = await store.saveVehicleRates({ "privat-bil": 30, forman: 12, firmabil: 99 });
+  const byId = (id) => types.find((v) => v.id === id);
+  assert.equal(byId("privat-bil").ratePerMil, 30);
+  assert.equal(byId("privat-bil").rateCustom, true);
+  assert.equal(byId("forman").rateCustom, false);
+  assert.equal(byId("firmabil").ratePerMil, null, "Firmabil har aldrig något belopp");
+
+  // Vid start: förval fylls i, egna belopp rörs inte
+  await store.init();
+  types = (await store.getSettings()).vehicleTypes;
+  assert.equal(byId("privat-bil").ratePerMil, 30);
+  // Tillbaka till Skatteverkets belopp = följer förvalet igen
+  types = await store.saveVehicleRates({ "privat-bil": 25 });
+  assert.equal(byId("privat-bil").rateCustom, false);
+});
+
+await test("milersättning: äldre data – bensin och diesel blir Förmånsbil, tomma belopp får förval", async () => {
+  const saved = local.getItem("tidla:settings");
+  const settings = JSON.parse(saved);
+  settings.vehicleTypes = [
+    { id: "firmabil", name: "Firmabil", isCompanyCar: true, ratePerMil: null, hidden: false },
+    { id: "privat-bil", name: "Privat bil", isCompanyCar: false, ratePerMil: 28, hidden: false },
+    { id: "forman-bensin", name: "Förmånsbil – bensin", isCompanyCar: false, ratePerMil: null, hidden: false },
+    { id: "forman-diesel", name: "Förmånsbil – diesel", isCompanyCar: false, ratePerMil: null, hidden: true },
+    { id: "forman-el", name: "Förmånsbil – el", isCompanyCar: false, ratePerMil: null, hidden: true },
+    { id: "motorcykel", name: "Motorcykel", isCompanyCar: false, ratePerMil: null, hidden: true },
+  ];
+  local.setItem("tidla:settings", JSON.stringify(settings));
+  await store.init();
+  const types = (await store.getSettings()).vehicleTypes;
+  const byId = (id) => types.find((v) => v.id === id);
+  assert.deepEqual([byId("privat-bil").ratePerMil, byId("privat-bil").rateCustom], [28, true], "Eget belopp ska ligga kvar");
+  assert.deepEqual([byId("forman").ratePerMil, byId("forman").hidden], [12, false], "Förmånsbil ska synas när bensin syntes");
+  assert.equal(byId("forman-el").ratePerMil, 9.5);
+  assert.ok(byId("forman-bensin").retired && byId("forman-bensin").hidden, "Gamla typen ska vara ersatt");
+  assert.equal(byId("motorcykel").ratePerMil, null);
+  local.setItem("tidla:settings", saved);
+});
+
+await test("milersättning: påminnelse när beloppen gäller ett tidigare år", async () => {
+  const { ratesNeedCheck } = await import("../js/lib/reminders.js");
+  const settings = { vehicleTypes: [{ id: "privat-bil", ratePerMil: 25, rateYear: 2026, hidden: false }, { id: "x", ratePerMil: 30, rateYear: 2025, hidden: true }] };
+  assert.equal(ratesNeedCheck(settings, "2026-12-31").due, false);
+  assert.deepEqual(ratesNeedCheck(settings, "2027-01-02"), { due: true, validYear: 2026, year: 2027 });
+  await store.confirmVehicleRates();
+  const confirmed = (await store.getSettings()).vehicleTypes;
+  assert.ok(confirmed.filter((v) => v.ratePerMil !== null).every((v) => v.rateYear >= Number(store.VEHICLE_RATES.year)));
 });
 
 console.log("Tema");

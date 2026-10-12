@@ -1,22 +1,21 @@
 // Material (bara admin) – med företagets egen benämning. Två flikar:
-//   Uttag:    nya och hanterade uttag, filter, markera som hanterade
-//   Artiklar: företagets artikellista, startförslag per bransch
+//   Från lagret: det medarbetarna har tagit från lagret – nya och klara, filter, markera som klara
+//                (klar = admin har tagit hand om det, t.ex. beställt nytt eller fakturerat)
+//   Artiklar: företagets artikellista, startförslag för bygg
 // #/material/artiklar öppnar fliken Artiklar direkt.
 import * as store from "../store.js";
 import { html, setHTML } from "../lib/html.js";
 import { icon } from "../lib/icons.js";
 import { formatDate, formatShort } from "../lib/dates.js";
-import { formatAmount, plural } from "../lib/format.js";
+import { formatQuantity, plural } from "../lib/format.js";
 import {
   field, input, select, statusPill, pill, emptyState, openDialog, confirmDialog, notify,
 } from "../lib/ui.js";
-import { ARTICLE_TEMPLATES, UNITS } from "../store.js";
+import { ARTICLE_TEMPLATE, UNITS } from "../store.js";
+import { placeKey, placeLabel, projectsOn } from "../lib/place.js";
 import { ADMIN } from "../routes.js";
 import { allowed } from "./guard.js";
 import { updateBadges } from "./shell.js";
-
-// 2 → "2", 2.5 → "2,5"
-const quantityText = (q) => formatAmount(q).replace(/,00$/, "").replace(/(,\d)0$/, "$1");
 
 export async function render(container, ctx) {
   if (!allowed(ctx, ADMIN, container)) return;
@@ -31,7 +30,7 @@ export async function render(container, ctx) {
         ${emptyState({
           iconName: "box",
           title: `${label} är avstängt`,
-          text: "Slå på funktionen under Inställningar om medarbetarna ska kunna registrera uttag från lagret.",
+          text: "Slå på funktionen under Inställningar om medarbetarna ska kunna registrera material som de tar från lagret.",
           action: html`<a class="btn btn--primary" href="#/installningar">Till Inställningar</a>`,
         })}`,
     );
@@ -41,7 +40,7 @@ export async function render(container, ctx) {
   const state = {
     tab: ctx.params[0] === "artiklar" ? "artiklar" : "uttag",
     status: "new",
-    projectId: "",
+    place: "",
     q: "",
     items: [],
     articles: [],
@@ -67,11 +66,11 @@ export async function render(container, ctx) {
       <div class="page-head">
         <div class="page-head__text">
           <h1 class="page-title">${label}</h1>
-          <p class="page-lead">Uttag som medarbetarna registrerar och artiklarna de kan välja bland.</p>
+          <p class="page-lead">Material som medarbetarna har tagit från lagret – och artiklarna de kan välja bland.</p>
         </div>
       </div>
       <div class="segmented" role="group" aria-label="Visa">
-        <button type="button" class="segmented__btn" data-tab="uttag">Uttag</button>
+        <button type="button" class="segmented__btn" data-tab="uttag">Från lagret</button>
         <button type="button" class="segmented__btn" data-tab="artiklar">Artiklar</button>
       </div>
       <div class="stack" data-content></div>
@@ -80,11 +79,9 @@ export async function render(container, ctx) {
 
   const content = container.querySelector("[data-content]");
   const userName = (id) => state.users.find((u) => u.id === id)?.name ?? "Okänd";
-  const projectLabel = (id) => {
-    const p = state.projects.find((x) => x.id === id);
-    const c = state.customers.find((x) => x.id === p?.customerId);
-    return p ? `${c?.name ?? "Okänd kund"} · ${p.projectNo} ${p.name}` : "Okänt projekt";
-  };
+  // Raden hör till ett projekt – eller bara en kund när projekt inte används
+  const placeText = (m) =>
+    placeLabel(m, (id) => state.projects.find((x) => x.id === id), (id) => state.customers.find((x) => x.id === id));
 
   function renderTab() {
     container.querySelectorAll("[data-tab]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tab === state.tab)));
@@ -92,10 +89,12 @@ export async function render(container, ctx) {
     else renderItems();
   }
 
-  /* ---------- Uttag ---------- */
+  /* ---------- Från lagret ---------- */
 
   function renderItems() {
-    const usedProjects = [...new Set(state.items.map((m) => m.projectId))];
+    // Projekten (eller kunderna) som har något från lagret
+    const usedPlaces = [...new Map(state.items.map((m) => [placeKey(m), placeText(m)])).entries()];
+    const withProjects = projectsOn(ctx.settings);
     setHTML(
       content,
       html`
@@ -113,23 +112,23 @@ export async function render(container, ctx) {
               value: state.status,
               options: [
                 { value: "new", label: "Nya" },
-                { value: "handled", label: "Hanterade" },
+                { value: "handled", label: "Klara" },
                 { value: "all", label: "Alla" },
               ],
             }),
           })}
           ${field({
-            id: "mt-project",
-            label: "Projekt",
+            id: "mt-place",
+            label: withProjects ? "Projekt" : "Kund",
             control: select({
-              id: "mt-project",
-              value: state.projectId,
-              placeholder: "Alla projekt",
-              options: usedProjects.map((id) => ({ value: id, label: projectLabel(id) })),
+              id: "mt-place",
+              value: state.place,
+              placeholder: withProjects ? "Alla projekt" : "Alla kunder",
+              options: usedPlaces.map(([key, label]) => ({ value: key, label })),
             }),
           })}
         </div>
-        <div data-items></div>
+        <div class="stack stack--m" data-items></div>
       `,
     );
     content.querySelector("#mt-search").addEventListener("input", (e) => {
@@ -140,8 +139,8 @@ export async function render(container, ctx) {
       state.status = e.target.value;
       renderItemList();
     });
-    content.querySelector("#mt-project").addEventListener("change", (e) => {
-      state.projectId = e.target.value;
+    content.querySelector("#mt-place").addEventListener("change", (e) => {
+      state.place = e.target.value;
       renderItemList();
     });
     renderItemList();
@@ -151,7 +150,7 @@ export async function render(container, ctx) {
     const query = state.q.trim().toLowerCase();
     return state.items
       .filter((m) => state.status === "all" || (state.status === "new" ? !m.handled : m.handled))
-      .filter((m) => !state.projectId || m.projectId === state.projectId)
+      .filter((m) => !state.place || placeKey(m) === state.place)
       .filter((m) => !query || `${m.name} ${userName(m.userId)} ${m.message}`.toLowerCase().includes(query));
   }
 
@@ -162,9 +161,9 @@ export async function render(container, ctx) {
     if (!state.items.length) {
       setHTML(host, emptyState({
         iconName: "box",
-        title: "Inga uttag än",
+        title: "Inget har tagits från lagret än",
         text: state.articles.length
-          ? "När medarbetarna registrerar uttag visas de här."
+          ? "När medarbetarna registrerar material från lagret visas det här."
           : "Börja med att lägga till artiklar, så att medarbetarna kan välja i en lista.",
         action: state.articles.length ? "" : html`<button type="button" class="btn btn--primary" data-tab="artiklar">Till Artiklar</button>`,
       }));
@@ -173,10 +172,14 @@ export async function render(container, ctx) {
     setHTML(
       host,
       html`
+        <p class="text-muted text-small">
+          <strong>Markera som klar</strong> när du har tagit hand om raden – till exempel beställt nytt eller lagt det på kundens faktura.
+          Klara rader kan inte längre tas bort av medarbetaren.
+        </p>
         <div class="split split--center">
-          <p class="text-muted text-small" aria-live="polite">${plural(rows.length, "uttag", "uttag")}</p>
+          <p class="text-muted text-small" aria-live="polite">${plural(rows.length, "rad", "rader")}</p>
           ${newRows.length > 1
-            ? html`<button type="button" class="btn btn--secondary btn--sm" data-handle-all>${icon("check", 16)}Markera ${newRows.length} som hanterade</button>`
+            ? html`<button type="button" class="btn btn--secondary btn--sm" data-handle-all>${icon("check", 16)}Markera ${newRows.length} som klara</button>`
             : ""}
         </div>
         ${rows.length
@@ -184,20 +187,20 @@ export async function render(container, ctx) {
               ${rows.map((m) => html`<li class="row row--wrap${m.handled ? " row--muted" : ""}">
                 <span class="row__icon${m.handled ? "" : " row__icon--pink"}">${icon("box", 20)}</span>
                 <span class="row__body">
-                  <span class="row__title">${m.name} · ${quantityText(m.quantity)} ${m.unit}</span>
-                  <span class="row__meta">${formatShort(m.date)} · ${userName(m.userId)} · ${projectLabel(m.projectId)}</span>
+                  <span class="row__title">${m.name} · ${formatQuantity(m.quantity, m.unit)}</span>
+                  <span class="row__meta">${formatShort(m.date)} · ${userName(m.userId)} · ${placeText(m)}</span>
                   ${m.message ? html`<span class="row__meta">”${m.message}”</span>` : ""}
                 </span>
                 <span class="row__aside">${statusPill(m.handled ? "handled" : "new")}</span>
                 <span class="row__actions">
                   <button type="button" class="btn ${m.handled ? "btn--text" : "btn--secondary"} btn--sm" data-handle="${m.id}"
-                    aria-label="${m.handled ? "Ångra hanterad" : "Markera som hanterad"}: ${m.name}">
-                    ${m.handled ? "Ångra" : html`${icon("check", 16)}Hanterad`}
+                    aria-label="${m.handled ? "Ångra klar" : "Markera som klar"}: ${m.name}">
+                    ${m.handled ? "Ångra" : html`${icon("check", 16)}Klar`}
                   </button>
                   ${m.handled
                     ? ""
                     : html`<button type="button" class="icon-btn icon-btn--ghost icon-btn--danger" data-delete-item="${m.id}" title="Ta bort"
-                        aria-label="Ta bort uttaget ${m.name}">${icon("trash", 18)}</button>`}
+                        aria-label="Ta bort ${m.name}">${icon("trash", 18)}</button>`}
                 </span>
               </li>`)}
             </ul>`
@@ -216,7 +219,7 @@ export async function render(container, ctx) {
         <div class="split split--center split--stack">
           <p class="text-muted text-small">${plural(visible, "artikel", "artiklar")} i listan${state.articles.length > visible ? ` · ${state.articles.length - visible} dolda` : ""}</p>
           <div class="cluster">
-            <button type="button" class="btn btn--secondary" data-templates>${icon("plus")}Förslag per bransch</button>
+            <button type="button" class="btn btn--secondary" data-templates>${icon("plus")}Förslag på artiklar</button>
             <button type="button" class="btn btn--primary" data-new-article>${icon("plus")}Ny artikel</button>
           </div>
         </div>
@@ -238,8 +241,8 @@ export async function render(container, ctx) {
           : emptyState({
               iconName: "box",
               title: "Lägg till er första artikel",
-              text: "Lägg till det ni faktiskt använder – eller börja med förslagen för er bransch och ändra dem sedan.",
-              action: html`<button type="button" class="btn btn--primary" data-templates>Visa förslag per bransch</button>`,
+              text: "Lägg till det ni faktiskt använder – eller börja med vanliga byggartiklar och ändra dem sedan.",
+              action: html`<button type="button" class="btn btn--primary" data-templates>Visa förslag på artiklar</button>`,
             })}
       `,
     );
@@ -279,25 +282,25 @@ export async function render(container, ctx) {
   }
 
   async function templateDialog() {
+    // Bara förslag som inte redan finns i listan (samma namn, oavsett stora och små bokstäver)
+    const missing = ARTICLE_TEMPLATE.filter(([name]) => !state.articles.some((a) => a.name.toLowerCase() === name.toLowerCase()));
     const result = await openDialog({
-      title: "Förslag per bransch",
-      body: html`<p>Lägg till vanliga artiklar för en bransch. Du kan sedan byta namn, ändra enhet och dölja det ni inte använder.
-        Artiklar som redan finns läggs inte till igen.</p>
-        <div class="stack stack--s">
-          ${Object.entries(ARTICLE_TEMPLATES).map(
-            ([key, t]) => html`<button type="submit" class="quick" value="${key}">
-              <span class="row__icon">${icon("box", 19)}</span>
-              <span class="row__body">
-                <span class="row__title">${t.label}</span>
-                <span class="row__meta">${t.articles.map(([n]) => n).join(", ")}</span>
-              </span>
-              <span class="row__arrow">${icon("plus")}</span>
-            </button>`,
-          )}
-        </div>`,
-      actions: html`<button type="button" class="btn btn--secondary" data-close>Stäng</button>`,
-      onSubmit: async ({ action }) => {
-        const added = await store.addArticleTemplate(action);
+      title: "Förslag på artiklar",
+      body: missing.length
+        ? html`<p>Lägg till vanliga byggartiklar. Du kan sedan byta namn, ändra enhet och dölja det ni inte använder.</p>
+            <ul class="text-muted text-small">
+              ${missing.map(([name, unit]) => html`<li>${name} (${unit})</li>`)}
+            </ul>
+            ${missing.length < ARTICLE_TEMPLATE.length
+              ? html`<p class="text-muted text-small">${plural(ARTICLE_TEMPLATE.length - missing.length, "förslag finns", "förslag finns")} redan i listan och visas inte.</p>`
+              : ""}`
+        : html`<p>Alla förslag finns redan i artikellistan.</p>`,
+      actions: missing.length
+        ? html`<button type="button" class="btn btn--secondary" data-close>Avbryt</button>
+            <button type="submit" class="btn btn--primary" value="add">${icon("plus")}Lägg till ${plural(missing.length, "artikel", "artiklar")}</button>`
+        : html`<button type="button" class="btn btn--primary" data-close>Stäng</button>`,
+      onSubmit: async () => {
+        const added = await store.addArticleTemplate();
         notify(added ? `${plural(added, "artikel", "artiklar")} lades till` : "Alla förslag fanns redan");
         return "done";
       },
@@ -338,7 +341,7 @@ export async function render(container, ctx) {
       if (handle) {
         const m = state.items.find((x) => x.id === handle.dataset.handle);
         await store.setMaterialsHandled([m.id], !m.handled);
-        notify(m.handled ? "Uttaget är markerat som nytt igen" : "Uttaget är hanterat");
+        notify(m.handled ? `${m.name} är markerad som ny igen` : `${m.name} är markerad som klar`);
         await load();
         renderItemList();
         updateBadges();
@@ -346,13 +349,13 @@ export async function render(container, ctx) {
       if (target.closest("[data-handle-all]")) {
         const ids = filteredItems().filter((m) => !m.handled).map((m) => m.id);
         const ok = await confirmDialog({
-          title: `Markera ${ids.length} uttag som hanterade?`,
-          message: "Alla nya uttag som visas i listan markeras som hanterade.",
-          confirmLabel: "Markera som hanterade",
+          title: `Markera ${ids.length} rader som klara?`,
+          message: "Alla nya rader som visas i listan markeras som klara.",
+          confirmLabel: "Markera som klara",
         });
         if (!ok) return;
         await store.setMaterialsHandled(ids);
-        notify(`${plural(ids.length, "uttag", "uttag")} är hanterade`);
+        notify(plural(ids.length, "rad är markerad som klar", "rader är markerade som klara"));
         await load();
         renderItemList();
         updateBadges();
@@ -361,14 +364,14 @@ export async function render(container, ctx) {
       if (del) {
         const m = state.items.find((x) => x.id === del.dataset.deleteItem);
         const ok = await confirmDialog({
-          title: "Ta bort uttaget?",
-          message: `${m.name} · ${quantityText(m.quantity)} ${m.unit}, registrerat av ${userName(m.userId)} ${formatDate(m.date)}.`,
+          title: `Ta bort ${m.name}?`,
+          message: `${formatQuantity(m.quantity, m.unit)} från lagret, registrerat av ${userName(m.userId)} ${formatDate(m.date)}.`,
           confirmLabel: "Ta bort",
           danger: true,
         });
         if (!ok) return;
         await store.deleteMaterial(m.id);
-        notify("Uttaget är borttaget");
+        notify(`${m.name} är borttagen`);
         await load();
         renderItemList();
         updateBadges();

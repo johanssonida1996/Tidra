@@ -81,7 +81,7 @@ export function themeChoiceControl() {
     html`<button type="button" class="segmented__btn" data-theme-choice="${value}" aria-pressed="${String(choice === value)}">
       <span class="segmented__inner">${icon(iconName, 16)}${label}</span>
     </button>`;
-  return html`<div class="segmented" role="group" aria-label="Tema">
+  return html`<div class="segmented segmented--fit" role="group" aria-label="Tema">
     ${option("system", "Automatiskt", "monitor")}${option("light", "Ljust", "sun")}${option("dark", "Mörkt", "moon")}
   </div>`;
 }

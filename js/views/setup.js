@@ -1,20 +1,19 @@
 // Skapa konto (första start). Ser ut som inloggningen: ett formulär med företagsnamn och
 // administratörens konto. Organisationsnummer och arbetstid fylls i efter inloggningen –
 // arbetstiden får förvalet mån–fre 8 h tills dess.
-// Visas bara när det inte finns några användare. Därefter loggas admin in och hamnar på "Kom igång".
+// Visas bara när det inte finns några användare (i testversionen alltid). Därefter loggas admin in och hamnar på "Kom igång".
 import * as store from "../store.js";
 import { html, setHTML } from "../lib/html.js";
 import { MIN_PASSWORD_LENGTH } from "../auth.js";
 import {
-  field, input, passwordToggle, bindPasswordToggles, showFormErrors, clearFormErrors, setBusy, notify,
+  field, input, passwordToggle, bindPasswordToggles, showFormErrors, clearFormErrors, setBusy, notify, confirmDialog,
 } from "../lib/ui.js";
-import { authLayout } from "./auth-layout.js";
+import { authLayout, authSwitch } from "./auth-layout.js";
 import { DEMO_MODE } from "../config.js";
-import { demoPicker, bindDemoPicker } from "../demo/picker.js";
 
 const HERO = {
   headline: "Kom igång med Tidla.",
-  lead: "Skapa ett konto för ditt företag. Resten ställer du in när du är inloggad.",
+  lead: "Skapa ett konto för ditt byggföretag. Resten ställer du in när du är inloggad.",
   features: ["Klart på en minut", "Ingen installation", "Funkar i mobilen"],
 };
 
@@ -25,6 +24,7 @@ export function render(container, ctx) {
     container,
     authLayout(
       html`
+        ${authSwitch("signup")}
         <div class="auth__intro">
           <h1 class="auth__title">Skapa konto</h1>
           <p class="auth__subtitle">Du blir administratör och kan lägga till kunder, projekt och medarbetare.</p>
@@ -67,12 +67,10 @@ export function render(container, ctx) {
         </form>
 
         <p class="auth__footnote">Är du medarbetare? Be din administratör om en inbjudan.</p>
-        ${DEMO_MODE ? demoPicker() : ""}
       `,
       HERO,
     ),
   );
-  if (DEMO_MODE) bindDemoPicker(container, ctx);
 
   bindPasswordToggles(container);
 
@@ -91,6 +89,19 @@ export function render(container, ctx) {
     if (Object.keys(fields).length) {
       showFormErrors(form, { message: "Kontrollera de markerade fälten.", fields });
       return;
+    }
+
+    // Testversionen: ett företag per webbläsare – ett nytt konto ersätter det som finns.
+    // (I den riktiga versionen skapas nya företag på servern i fas 2.)
+    if (DEMO_MODE && !(await store.needsSetup())) {
+      const ok = await confirmDialog({
+        title: "Skapa ett nytt företag?",
+        message: "Det som finns i Tidla i den här webbläsaren raderas. Sedan skapas ditt företag och du blir administratör.",
+        confirmLabel: "Radera och skapa konto",
+        danger: true,
+      });
+      if (!ok) return;
+      await store.resetAllData();
     }
 
     const button = form.querySelector('button[type="submit"]');

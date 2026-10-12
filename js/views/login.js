@@ -2,14 +2,13 @@
 import { html, setHTML } from "../lib/html.js";
 import * as store from "../store.js";
 import { field, input, passwordToggle, bindPasswordToggles, callout, showFormErrors, clearFormErrors, setBusy } from "../lib/ui.js";
-import { authLayout } from "./auth-layout.js";
-import { DEMO_MODE } from "../config.js";
-import { demoPicker, bindDemoPicker } from "../demo/picker.js";
+import { authLayout, authSwitch } from "./auth-layout.js";
 
 export function render(container, ctx) {
   setHTML(
     container,
     authLayout(html`
+      ${authSwitch("login")}
       <div class="auth__intro">
         <h1 class="auth__title">Logga in</h1>
         <p class="auth__subtitle">Använd e-posten du blev inbjuden med.</p>
@@ -68,10 +67,8 @@ export function render(container, ctx) {
       </form>
 
       <p class="auth__footnote">Ny medarbetare? Be din administratör om en inbjudan.</p>
-      ${DEMO_MODE ? demoPicker() : ""}
     `),
   );
-  if (DEMO_MODE) bindDemoPicker(container, ctx);
 
   bindPasswordToggles(container);
 

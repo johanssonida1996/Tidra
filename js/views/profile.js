@@ -86,8 +86,8 @@ export async function render(container, ctx) {
         </form>
       </section>
 
-      <section class="card split split--center" aria-label="Logga ut">
-        <p class="text-muted text-small">Inloggad som ${user.email}</p>
+      <section class="card split split--center split--stack" aria-label="Logga ut">
+        <p class="text-muted text-small text-break">Inloggad som ${user.email}</p>
         <button type="button" class="btn btn--secondary" data-profile-logout>${icon("logout", 17)}Logga ut</button>
       </section>
     `,

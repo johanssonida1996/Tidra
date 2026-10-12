@@ -3,8 +3,9 @@
 import * as store from "../store.js";
 import { html, setHTML, raw } from "../lib/html.js";
 import { icon } from "../lib/icons.js";
-import { WEEKDAYS, WEEKDAY_LABELS } from "../lib/dates.js";
-import { plural, parseHours, formatHours, formatHoursUnit } from "../lib/format.js";
+import { WEEKDAYS, WEEKDAY_LABELS, today, formatShort } from "../lib/dates.js";
+import { latestPeriod } from "../lib/schedule.js";
+import { plural, parseHours, formatHours, formatHoursUnit, nextNumber } from "../lib/format.js";
 import {
   field, input, select, statusPill, pill, avatar, emptyState, openDialog, confirmDialog, notify, callout,
 } from "../lib/ui.js";
@@ -43,7 +44,7 @@ export async function render(container, ctx) {
         ${field({
           id: "st-search",
           label: "Sök",
-          control: input({ id: "st-search", type: "search", iconName: "search", placeholder: "Namn, anställningsnummer eller e-post", autocomplete: "off" }),
+          control: input({ id: "st-search", type: "search", iconName: "search", placeholder: "Sök anställd", autocomplete: "off" }),
         })}
         ${field({
           id: "st-status",
@@ -92,7 +93,11 @@ export async function render(container, ctx) {
 
   function userRow(u) {
     const me = u.id === ctx.user.id;
-    const meta = [`Anst.nr ${u.employeeNo}`, u.title, u.email].filter(Boolean).join(" · ");
+    const latest = latestPeriod(u);
+    const ownSchedule = latest?.week
+      ? `Eget schema: ${formatHoursUnit(WEEKDAYS.reduce((sum, d) => sum + latest.week[d], 0))}/vecka${latest.from > today() ? ` från ${formatShort(latest.from)}` : ""}`
+      : latest && latest.from > today() ? `Företagets schema från ${formatShort(latest.from)}` : "";
+    const meta = [`Anst.nr ${u.employeeNo}`, u.title, u.email, ownSchedule].filter(Boolean).join(" · ");
     return html`<li class="row row--wrap${u.status === "inactive" ? " row--muted" : ""}">
       ${avatar(u.name)}
       <span class="row__body">
@@ -126,12 +131,11 @@ export async function render(container, ctx) {
           <strong>${user.email}</strong>. Vid första inloggningen väljer ${user.name.split(" ")[0]} ett eget lösenord.
         </p>
         <div class="secret" aria-label="Engångslösenord">${password}</div>
+        <!-- Kopiera ligger vid lösenordet, före Klart – så att man inte stänger dialogen först -->
+        <button type="button" class="btn btn--secondary btn--block" data-copy>${icon("copy", 16)}Kopiera lösenordet</button>
         ${callout("Lösenordet visas bara nu. Skriv ned det eller kopiera det innan du stänger.", { variant: "pink", iconName: "alert" })}
       `,
-      actions: html`
-        <button type="button" class="btn btn--secondary" data-copy>${icon("copy", 16)}Kopiera</button>
-        <button type="submit" class="btn btn--primary" value="done">Klart</button>
-      `,
+      actions: html`<button type="submit" class="btn btn--primary" value="done">Klart</button>`,
       initialFocus: "[data-copy]",
       onOpen: ({ dialog }) => {
         dialog.querySelector("[data-copy]").addEventListener("click", async (event) => {
@@ -170,15 +174,25 @@ export async function render(container, ctx) {
     const u = user ?? { role: "employee" };
     const me = user?.id === ctx.user.id;
     const companyWeek = WEEKDAYS.reduce((sum, d) => sum + state.settings.workWeek[d], 0);
+    // Senast inlagda schemat (kan börja gälla senare)
+    const current = latestPeriod(u);
 
-    const actions = html`
-      ${user && !me
-        ? html`<button type="submit" class="btn btn--text dialog__extra" value="reset" formnovalidate>${icon("key", 16)}Återställ lösenord</button>
-            <button type="submit" class="btn btn--text" value="status" formnovalidate>
+    // Kontoknapparna ligger i ett eget avsnitt i formuläret – inte bredvid Avbryt och Spara,
+    // där de flyttade när dialogen ändrade storlek
+    const accountActions = user && !me
+      ? html`<fieldset class="fieldset stack stack--s">
+          <legend class="field__label">Konto</legend>
+          <div class="cluster">
+            <button type="submit" class="btn btn--text btn--sm" value="reset" formnovalidate>${icon("key", 16)}Återställ lösenord</button>
+            <button type="submit" class="btn btn--text btn--sm" value="status" formnovalidate>
               ${u.status === "inactive" ? html`${icon("check", 16)}Aktivera igen` : html`${icon("minus", 16)}Inaktivera`}
             </button>
-            <button type="submit" class="btn btn--text btn--text-danger" value="delete" formnovalidate>${icon("trash", 16)}Ta bort</button>`
-        : ""}
+            <button type="submit" class="btn btn--text btn--text-danger btn--sm" value="delete" formnovalidate>${icon("trash", 16)}Ta bort</button>
+          </div>
+        </fieldset>`
+      : "";
+
+    const actions = html`
       <button type="button" class="btn btn--secondary" data-close>Avbryt</button>
       <button type="submit" class="btn btn--primary" value="save">${user ? "Spara" : "Lägg till och visa lösenord"}</button>
     `;
@@ -188,7 +202,17 @@ export async function render(container, ctx) {
       ${u.status === "pending" ? callout(`${u.name} har inte loggat in än. Tappat bort engångslösenordet? Återställ lösenordet för att få ett nytt.`, { iconName: "clock" }) : ""}
       <div class="grid-2">
         ${field({ id: "us-name", label: "Namn", control: input({ id: "us-name", name: "name", value: u.name, autocomplete: "off", required: true }) })}
-        ${field({ id: "us-no", label: "Anställningsnummer", control: input({ id: "us-no", name: "employeeNo", value: u.employeeNo, autocomplete: "off", required: true }) })}
+        ${field({
+          id: "us-no",
+          label: "Anställningsnummer",
+          help: user
+            ? "Följer med i löneunderlaget. Använd samma nummer som i lönesystemet om ni har ett."
+            : "Förslag: nästa lediga nummer. Följer med i löneunderlaget – ändra till numret i lönesystemet om ni har ett.",
+          control: input({
+            id: "us-no", name: "employeeNo", value: u.employeeNo ?? nextNumber(state.users.map((x) => x.employeeNo)),
+            autocomplete: "off", required: true, help: true,
+          }),
+        })}
         ${field({ id: "us-email", label: "E-post", help: "Används för att logga in.", control: input({ id: "us-email", name: "email", type: "email", value: u.email, autocomplete: "off", required: true, help: true }) })}
         ${field({ id: "us-phone", label: "Telefon", optional: true, control: input({ id: "us-phone", name: "phone", type: "tel", value: u.phone, autocomplete: "off" }) })}
         ${field({ id: "us-title", label: "Befattning", optional: true, control: input({ id: "us-title", name: "title", value: u.title, placeholder: "t.ex. Snickare", autocomplete: "off" }) })}
@@ -212,14 +236,23 @@ export async function render(container, ctx) {
       <fieldset class="fieldset stack stack--m">
         <legend class="field__label">Arbetstid</legend>
         <label class="check">
-          <input type="checkbox" name="ownSchedule" ${u.schedule ? raw("checked") : ""} />
+          <input type="checkbox" name="ownSchedule" ${current?.week ? raw("checked") : ""} />
           Eget arbetsschema
         </label>
-        <p class="text-help" data-company-schedule ${u.schedule ? raw("hidden") : ""}>
+        <p class="text-help" data-company-schedule ${current?.week ? raw("hidden") : ""}>
           Följer företagets arbetstid: ${formatHoursUnit(companyWeek)} per vecka.
         </p>
-        <div data-schedule ${u.schedule ? "" : raw("hidden")}>${scheduleFields(u.schedule)}</div>
+        <div data-schedule ${current?.week ? "" : raw("hidden")}>${scheduleFields(current?.week)}</div>
+        ${user
+          ? field({
+              id: "us-schedule-from",
+              label: "Ändringar av arbetstiden gäller från",
+              help: "Veckor före datumet räknas med arbetstiden som gällde då.",
+              control: input({ id: "us-schedule-from", name: "scheduleFrom", type: "date", value: today(), help: true }),
+            })
+          : ""}
       </fieldset>
+      ${accountActions}
     `;
 
     await openDialog({
@@ -296,6 +329,7 @@ export async function render(container, ctx) {
           title: data.title,
           role: me ? u.role : data.role,
           schedule,
+          scheduleFrom: data.scheduleFrom,
         });
         if (result.oneTimePassword) return { created: result.user, password: result.oneTimePassword };
         notify(`${result.user.name} är sparad`);

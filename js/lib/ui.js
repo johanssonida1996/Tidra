@@ -120,6 +120,12 @@ export function openDialog({ title, body, actions, wide = false, onSubmit, onOpe
   });
 }
 
+// Stänger alla öppna dialoger (vid byte av sida – dialogerna ligger i <body> och följer inte med vyn).
+// Dialogen svarar som om man tryckt Avbryt.
+export function closeAllDialogs() {
+  document.querySelectorAll("dialog[open]").forEach((dialog) => dialog.close());
+}
+
 // Bekräftelsedialog. requireText = text som måste skrivas in för att knappen ska aktiveras.
 export async function confirmDialog({
   title,
@@ -309,7 +315,7 @@ export function pill(label, variant = "draft", iconName) {
 }
 
 const STATUS = {
-  draft: ["Utkast", "draft", "edit"],
+  draft: ["Väntar på granskning", "draft", "clock"],
   approved: ["Godkänd", "success", "check"],
   rejected: ["Nekad", "rejected", "alert"],
   pending: ["Väntar på aktivering", "pending", "clock"],
@@ -319,7 +325,7 @@ const STATUS = {
   closed: ["Avslutat", "done", "check"],
   archived: ["Arkiverad", "draft", "archive"],
   new: ["Ny", "pending", "box"],
-  handled: ["Hanterad", "done", "check"],
+  handled: ["Klar", "done", "check"],
   locked: ["Klar", "done", "lock"],
 };
 

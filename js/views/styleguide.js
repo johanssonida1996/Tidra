@@ -158,7 +158,7 @@ export function render(root, ctx) {
               <span class="text-muted text-small">3 registreringar</span>
             </div>
             <ul class="list">
-              <li class="row">
+              <li class="row row--wrap">
                 <span class="row__icon">${icon("clock", 20)}</span>
                 <span class="row__body"><span class="row__title">Exempelkund · L-1 Takbyte</span><span class="row__meta">Firmabil, bil per dag</span></span>
                 <span class="row__aside">${statusPill("draft")}<span class="row__value">4,0 h</span></span>

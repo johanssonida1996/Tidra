@@ -1,29 +1,40 @@
 // Kunder & projekt.
 // Admin: flikar för projekt och kunder, sök/filter, lägga till, redigera, avsluta, arkivera och ta bort.
-// Medarbetare: läsvy över projekten med sök.
-// Adresser: #/projekt, #/projekt/kunder, #/projekt/projekt/ny, #/projekt/kunder/ny (öppnar formuläret direkt).
+// Medarbetare: läsvy över projekten med sök. Projekten fälls ut och visar adress, kontakt, beskrivning och dokument.
+// Använder företaget inte projekt (Inställningar) visas bara kunderna – för admin och medarbetare.
+// Adresser: #/projekt, #/projekt/kunder, #/projekt/projekt/ny, #/projekt/kunder/ny (öppnar formuläret direkt),
+// #/projekt/projekt/<id> (fäller ut projektet – länken från Tidrapporten).
 import * as store from "../store.js";
 import { html, setHTML, raw } from "../lib/html.js";
 import { icon } from "../lib/icons.js";
-import { plural } from "../lib/format.js";
+import { plural, nextNumber } from "../lib/format.js";
 import {
-  field, input, select, statusPill, emptyState, openDialog, confirmDialog, notify, callout,
+  field, input, select, textarea, statusPill, emptyState, openDialog, confirmDialog, notify, callout,
 } from "../lib/ui.js";
 import { isAdmin } from "../auth.js";
+import { projectsOn, mapUrl, telUrl } from "../lib/place.js";
 
 const sv = (a, b) => String(a).localeCompare(String(b), "sv", { numeric: true, sensitivity: "base" });
 
+// 1 234 567 byte → "1,2 MB"
+function formatSize(bytes) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} kB`;
+  return `${(bytes / 1024 / 1024).toLocaleString("sv-SE", { maximumFractionDigits: 1 })} MB`;
+}
+
 export async function render(container, ctx) {
   const admin = isAdmin(ctx.user);
+  const withProjects = projectsOn(ctx.settings);
   const [tab = "projekt", action] = ctx.params;
   const state = {
-    tab: admin && tab === "kunder" ? "kunder" : "projekt",
+    tab: !withProjects || (admin && tab === "kunder") ? "kunder" : "projekt",
     q: "",
     customerId: "",
     status: "open",
     archived: false,
     customers: [],
     projects: [],
+    open: new Set(),
   };
 
   async function load() {
@@ -41,21 +52,25 @@ export async function render(container, ctx) {
     html`
       <div class="page-head">
         <div class="page-head__text">
-          <h1 class="page-title">${admin ? "Kunder & projekt" : "Projekt"}</h1>
+          <h1 class="page-title">${!withProjects ? "Kunder" : admin ? "Kunder & projekt" : "Projekt"}</h1>
           <p class="page-lead">
-            ${admin
-              ? "En kund kan ha flera projekt. Medarbetarna väljer först kund och sedan projekt."
-              : "Projekten du kan rapportera tid på."}
+            ${!withProjects
+              ? admin
+                ? "Medarbetarna rapporterar tiden direkt på kunderna. Projekt kan slås på under Inställningar."
+                : "Kunderna du kan rapportera tid på."
+              : admin
+                ? "En kund kan ha flera projekt. Medarbetarna väljer först kund och sedan projekt."
+                : "Projekten du kan rapportera tid på. Tryck på ett projekt för adress, kontakt och dokument."}
           </p>
         </div>
         ${admin
           ? html`<div class="cluster page-head__actions">
-              <button type="button" class="btn btn--secondary" data-new-customer>${icon("plus")}Ny kund</button>
-              <button type="button" class="btn btn--primary" data-new-project>${icon("plus")}Nytt projekt</button>
+              <button type="button" class="btn ${withProjects ? "btn--secondary" : "btn--primary"}" data-new-customer>${icon("plus")}Ny kund</button>
+              ${withProjects ? html`<button type="button" class="btn btn--primary" data-new-project>${icon("plus")}Nytt projekt</button>` : ""}
             </div>`
           : ""}
       </div>
-      ${admin
+      ${admin && withProjects
         ? html`<div class="segmented" role="group" aria-label="Visa">
             <button type="button" class="segmented__btn" data-tab="projekt">Projekt</button>
             <button type="button" class="segmented__btn" data-tab="kunder">Kunder</button>
@@ -84,7 +99,7 @@ export async function render(container, ctx) {
               type: "search",
               iconName: "search",
               value: state.q,
-              placeholder: customersTab ? "Namn, kundnummer eller org.nr" : "Nummer, namn, kund eller adress",
+              placeholder: customersTab ? "Namn, kundnummer eller org.nr" : "Sök projekt",
               autocomplete: "off",
             }),
           })}
@@ -158,9 +173,9 @@ export async function render(container, ctx) {
       if (!state.customers.length) {
         setHTML(list, emptyState({
           iconName: "building",
-          title: "Lägg till din första kund",
-          text: "All tid rapporteras på en kund och ett projekt.",
-          action: html`<button type="button" class="btn btn--primary" data-new-customer>${icon("plus")}Ny kund</button>`,
+          title: admin ? "Lägg till din första kund" : "Inga kunder ännu",
+          text: withProjects ? "All tid rapporteras på en kund och ett projekt." : "All tid rapporteras på en kund.",
+          action: admin ? html`<button type="button" class="btn btn--primary" data-new-customer>${icon("plus")}Ny kund</button>` : "",
         }));
         return;
       }
@@ -175,7 +190,7 @@ export async function render(container, ctx) {
       .filter((p) => {
         if (!query) return true;
         const c = customerById(p.customerId);
-        return `${p.projectNo} ${p.name} ${p.address} ${c?.name ?? ""} ${c?.customerNo ?? ""}`.toLowerCase().includes(query);
+        return `${p.projectNo} ${p.name} ${p.address} ${p.contactName ?? ""} ${c?.name ?? ""} ${c?.customerNo ?? ""}`.toLowerCase().includes(query);
       })
       .sort((a, b) => sv(a.projectNo, b.projectNo));
     count.textContent = plural(rows.length, "projekt", "projekt");
@@ -202,25 +217,161 @@ export async function render(container, ctx) {
     return emptyState({ iconName: "search", title: "Inget matchar", text: "Ändra sökningen eller filtren." });
   }
 
+  // Raden fälls ut och visar adress, kontakt, beskrivning och dokument
   function projectRow(p) {
     const c = customerById(p.customerId);
     const meta = [c ? `${c.name} (kundnr ${c.customerNo})` : "Okänd kund", p.address].filter(Boolean).join(" · ");
-    return html`<li class="row row--wrap">
-      <span class="row__icon">${icon("folder", 20)}</span>
-      <span class="row__body">
-        <span class="row__title">${p.projectNo} · ${p.name}</span>
-        <span class="row__meta">${meta}</span>
-      </span>
-      <span class="row__aside">
-        ${p.archived || c?.archived ? statusPill("archived") : statusPill(p.status)}
-      </span>
-      ${admin
-        ? html`<span class="row__actions row__actions--end">
-            <button type="button" class="btn btn--secondary btn--sm" data-edit-project="${p.id}"
-              aria-label="Redigera ${p.projectNo} ${p.name}">${icon("edit", 16)}Redigera</button>
-          </span>`
-        : ""}
+    const open = state.open.has(p.id);
+    return html`<li class="project${open ? " project--open" : ""}" data-project="${p.id}">
+      <div class="project__head">
+        <button type="button" class="project__toggle" data-toggle-project="${p.id}" aria-expanded="${String(open)}" aria-controls="pr-detail-${p.id}">
+          <span class="row__icon">${icon("folder", 20)}</span>
+          <span class="row__body">
+            <span class="row__title">${p.projectNo} · ${p.name}</span>
+            <span class="row__meta">${meta}</span>
+          </span>
+          <span class="project__status">${p.archived || c?.archived ? statusPill("archived") : statusPill(p.status)}</span>
+          <span class="trip__chevron">${icon("chevronDown", 20)}</span>
+        </button>
+        ${admin
+          ? html`<span class="project__actions">
+              <button type="button" class="btn btn--secondary btn--sm" data-edit-project="${p.id}"
+                aria-label="Redigera ${p.projectNo} ${p.name}">${icon("edit", 16)}Redigera</button>
+            </span>`
+          : ""}
+      </div>
+      <div class="project__body" id="pr-detail-${p.id}" ${open ? "" : raw("hidden")}>${projectDetails(p)}</div>
     </li>`;
+  }
+
+  function projectDetails(p) {
+    const hasFacts = p.address || p.contactName || p.contactPhone || p.contactEmail;
+    const documents = p.documents ?? [];
+    return html`
+      ${hasFacts
+        ? html`<dl class="kv">
+            ${p.address
+              ? html`<dt>Adress</dt><dd><a href="${mapUrl(p.address)}" target="_blank" rel="noopener">${p.address}</a></dd>`
+              : ""}
+            ${p.contactName ? html`<dt>Kontaktperson</dt><dd>${p.contactName}</dd>` : ""}
+            ${p.contactPhone ? html`<dt>Telefon</dt><dd><a href="${telUrl(p.contactPhone)}">${p.contactPhone}</a></dd>` : ""}
+            ${p.contactEmail ? html`<dt>E-post</dt><dd><a href="mailto:${p.contactEmail}">${p.contactEmail}</a></dd>` : ""}
+          </dl>`
+        : ""}
+      ${p.description
+        ? html`<div class="project__section">
+            <h3 class="project__heading">Beskrivning</h3>
+            <p class="project__description">${p.description}</p>
+          </div>`
+        : ""}
+      <div class="project__section">
+        <h3 class="project__heading">Dokument</h3>
+        ${documents.length
+          ? html`<ul class="doc-list">
+              ${documents.map((d) => html`<li class="doc">
+                <button type="button" class="doc__open" data-open-doc="${d.id}" data-project-id="${p.id}">
+                  ${icon("file", 18)}
+                  <span class="doc__name">${d.name}</span>
+                  <span class="doc__size">${formatSize(d.size)}</span>
+                </button>
+                ${admin
+                  ? html`<button type="button" class="icon-btn icon-btn--ghost" data-delete-doc="${d.id}" data-project-id="${p.id}"
+                      aria-label="Ta bort ${d.name}">${icon("trash", 16)}</button>`
+                  : ""}
+              </li>`)}
+            </ul>`
+          : html`<p class="text-muted text-small">
+              ${admin ? "Lägg in ritningar, arbetsordrar och andra dokument som medarbetarna behöver." : "Inga dokument ännu."}
+            </p>`}
+        ${admin
+          ? html`<div>
+              <label class="btn btn--secondary btn--sm file-button">
+                ${icon("upload", 16)}Lägg till dokument
+                <input type="file" multiple data-add-docs="${p.id}" />
+              </label>
+            </div>`
+          : ""}
+      </div>
+      ${!hasFacts && !p.description && admin
+        ? html`<p class="text-help">Adress, kontaktperson och beskrivning fyller du i under Redigera.</p>`
+        : ""}
+    `;
+  }
+
+  // Ritar om ett projekt efter en ändring och behåller det utfällt
+  function replaceProject(saved) {
+    state.projects = state.projects.map((p) => (p.id === saved.id ? saved : p));
+    const item = content.querySelector(`[data-project="${CSS.escape(saved.id)}"]`);
+    if (!item) return;
+    const body = item.querySelector(".project__body");
+    setHTML(body, projectDetails(saved));
+  }
+
+  async function addDocuments(inputEl) {
+    const projectId = inputEl.dataset.addDocs;
+    const files = [...inputEl.files];
+    inputEl.value = "";
+    if (!files.length) return;
+    try {
+      replaceProject(await store.addProjectDocuments(projectId, files));
+      notify(files.length === 1 ? "Dokumentet är tillagt" : `${files.length} dokument är tillagda`);
+    } catch (error) {
+      notify(error.message, { type: "error" });
+    }
+    content.querySelector(`[data-add-docs="${CSS.escape(projectId)}"]`)?.focus();
+  }
+
+  async function deleteDocument(projectId, documentId) {
+    const doc = state.projects.find((p) => p.id === projectId)?.documents?.find((d) => d.id === documentId);
+    if (!doc) return;
+    const ok = await confirmDialog({
+      title: `Ta bort ${doc.name}?`,
+      message: "Dokumentet tas bort från projektet och kan inte längre öppnas av medarbetarna.",
+      confirmLabel: "Ta bort",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      replaceProject(await store.deleteProjectDocument(projectId, documentId));
+      notify("Dokumentet är borttaget");
+    } catch (error) {
+      notify(error.message, { type: "error" });
+    }
+    content.querySelector(`[data-add-docs="${CSS.escape(projectId)}"]`)?.focus();
+  }
+
+  // PDF och bilder öppnas i en ny flik, annat laddas ner. Fliken öppnas direkt vid klicket –
+  // annars stoppas den av popup-spärren när filen hämtas.
+  async function openDocument(projectId, documentId) {
+    const doc = state.projects.find((p) => p.id === projectId)?.documents?.find((d) => d.id === documentId);
+    const viewable = /^(image\/|application\/pdf$|text\/plain$)/.test(doc?.type ?? "");
+    const tab = viewable ? window.open("", "_blank") : null;
+    try {
+      const { name, blob } = await store.getProjectDocument(projectId, documentId);
+      const url = URL.createObjectURL(blob);
+      if (tab) {
+        tab.location.href = url;
+      } else {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = name;
+        link.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      tab?.close();
+      notify(error.message, { type: "error" });
+    }
+  }
+
+  function toggleProject(button) {
+    const id = button.dataset.toggleProject;
+    const open = !state.open.has(id);
+    if (open) state.open.add(id);
+    else state.open.delete(id);
+    button.setAttribute("aria-expanded", String(open));
+    button.closest(".project").classList.toggle("project--open", open);
+    content.querySelector(`#pr-detail-${CSS.escape(id)}`).hidden = !open;
   }
 
   function customerRow(c) {
@@ -233,12 +384,14 @@ export async function render(container, ctx) {
         <span class="row__meta">${meta}</span>
       </span>
       <span class="row__aside">
-        ${c.archived ? statusPill("archived") : html`<span class="text-muted text-small">${plural(count, "projekt", "projekt")}</span>`}
+        ${c.archived ? statusPill("archived") : withProjects ? html`<span class="text-muted text-small">${plural(count, "projekt", "projekt")}</span>` : ""}
       </span>
-      <span class="row__actions row__actions--end">
-        <button type="button" class="btn btn--secondary btn--sm" data-edit-customer="${c.id}"
-          aria-label="Redigera ${c.name}">${icon("edit", 16)}Redigera</button>
-      </span>
+      ${admin
+        ? html`<span class="row__actions row__actions--end">
+            <button type="button" class="btn btn--secondary btn--sm" data-edit-customer="${c.id}"
+              aria-label="Redigera ${c.name}">${icon("edit", 16)}Redigera</button>
+          </span>`
+        : ""}
     </li>`;
   }
 
@@ -262,10 +415,20 @@ export async function render(container, ctx) {
       <button type="submit" class="btn btn--primary" value="save">${customer ? "Spara" : "Lägg till kund"}</button>
     `;
     const body = html`
-      ${customer?.archived ? callout("Kunden är arkiverad. Den och dess projekt syns inte för medarbetarna.", { iconName: "archive" }) : ""}
+      ${customer?.archived ? callout(withProjects ? "Kunden är arkiverad. Den och dess projekt syns inte för medarbetarna." : "Kunden är arkiverad och syns inte för medarbetarna.", { iconName: "archive" }) : ""}
       <div class="grid-2">
-        ${field({ id: "cu-no", label: "Kundnummer", control: input({ id: "cu-no", name: "customerNo", value: c.customerNo, required: true, autocomplete: "off" }) })}
         ${field({ id: "cu-name", label: "Namn", control: input({ id: "cu-name", name: "name", value: c.name, required: true, autocomplete: "off" }) })}
+        ${field({
+          id: "cu-no",
+          label: "Kundnummer",
+          help: customer
+            ? "Följer med i fakturaunderlaget."
+            : "Förslag: nästa lediga nummer. Följer med i fakturaunderlaget – ändra till kundnumret i ert faktureringsprogram om ni har ett.",
+          control: input({
+            id: "cu-no", name: "customerNo", value: c.customerNo ?? nextNumber(state.customers.map((x) => x.customerNo)),
+            required: true, autocomplete: "off", help: true,
+          }),
+        })}
         ${field({
           id: "cu-org",
           label: "Organisationsnummer",
@@ -291,7 +454,7 @@ export async function render(container, ctx) {
         if (action === "delete") {
           const ok = await confirmDialog({
             title: `Ta bort ${c.name}?`,
-            message: "Kunden tas bort permanent. Kunder med projekt kan inte tas bort – arkivera dem i stället.",
+            message: "Kunden tas bort permanent. Kunder med projekt eller registreringar kan inte tas bort – arkivera dem i stället.",
             confirmLabel: "Ta bort",
             danger: true,
           });
@@ -311,8 +474,9 @@ export async function render(container, ctx) {
   }
 
   async function projectDialog(project = null) {
-    const p = project ?? { status: "open", customerId: state.customerId };
-    const choosable = state.customers.filter((c) => !c.archived || c.id === p.customerId);
+    const choosable = state.customers.filter((c) => !c.archived || c.id === project?.customerId);
+    const onlyCustomer = choosable.length === 1 ? choosable[0].id : "";
+    const p = project ?? { status: "open", customerId: state.customerId || onlyCustomer };
     if (!choosable.length) {
       await openDialog({
         title: "Lägg till en kund först",
@@ -351,9 +515,25 @@ export async function render(container, ctx) {
             options: choosable.map((c) => ({ value: c.id, label: `${c.name} (kundnr ${c.customerNo})` })),
           }),
         })}
-        ${field({ id: "pj-projectno", label: "Projektnummer", control: input({ id: "pj-projectno", name: "projectNo", value: p.projectNo, placeholder: "t.ex. 26015", required: true, autocomplete: "off" }) })}
         ${field({ id: "pj-name", label: "Projektnamn", control: input({ id: "pj-name", name: "name", value: p.name, required: true, autocomplete: "off" }) })}
-        ${field({ id: "pj-address", label: "Projektadress", optional: true, control: input({ id: "pj-address", name: "address", value: p.address, autocomplete: "off" }) })}
+        ${field({
+          id: "pj-projectno",
+          label: "Projektnummer",
+          help: project
+            ? "Visas i tidrapporten och följer med i fakturaunderlaget."
+            : "Förslag: nästa lediga nummer. Visas i tidrapporten och följer med i fakturaunderlaget.",
+          control: input({
+            id: "pj-projectno", name: "projectNo", value: p.projectNo ?? nextNumber(state.projects.map((x) => x.projectNo)),
+            required: true, autocomplete: "off", help: true,
+          }),
+        })}
+        ${field({
+          id: "pj-address",
+          label: "Projektadress",
+          optional: true,
+          help: "Medarbetarna kan öppna adressen i kartan.",
+          control: input({ id: "pj-address", name: "address", value: p.address, autocomplete: "off", help: true }),
+        })}
         ${field({
           id: "pj-status",
           label: "Status",
@@ -370,6 +550,37 @@ export async function render(container, ctx) {
           }),
         })}
       </div>
+      <fieldset class="fieldset">
+        <legend class="field__label">Kontakt på plats</legend>
+        <div class="grid-2">
+          ${field({
+            id: "pj-contact",
+            label: "Kontaktperson",
+            optional: true,
+            className: "span-all",
+            control: input({ id: "pj-contact", name: "contactName", value: p.contactName, autocomplete: "off" }),
+          })}
+          ${field({
+            id: "pj-phone",
+            label: "Telefon",
+            optional: true,
+            control: input({ id: "pj-phone", name: "contactPhone", type: "tel", value: p.contactPhone, autocomplete: "off" }),
+          })}
+          ${field({
+            id: "pj-email",
+            label: "E-post",
+            optional: true,
+            control: input({ id: "pj-email", name: "contactEmail", type: "email", value: p.contactEmail, autocomplete: "off" }),
+          })}
+        </div>
+      </fieldset>
+      ${field({
+        id: "pj-description",
+        label: "Beskrivning",
+        optional: true,
+        help: "Syns för medarbetarna under Projekt, t.ex. portkod, var nyckeln finns eller vad som ska göras. Dokument lägger du till i projektlistan.",
+        control: textarea({ id: "pj-description", name: "description", value: p.description, rows: 4, "aria-describedby": "pj-description-help" }),
+      })}
     `;
 
     await openDialog({
@@ -396,12 +607,23 @@ export async function render(container, ctx) {
           return "done";
         }
         const data = Object.fromEntries(new FormData(form));
-        await store.saveProject({ ...data, id: p.id });
+        const saved = await store.saveProject({ ...data, id: p.id });
+        if (!project) {
+          // Filtren får inte dölja det nya projektet
+          state.customerId = "";
+          state.status = saved.status;
+          state.q = "";
+        }
         notify(project ? "Projektet är sparat" : "Projektet är tillagt");
-        return "done";
+        return project ? "done" : "added";
       },
     }).then(async (result) => {
-      if (result === "done") await refresh();
+      if (result === "added" && state.tab !== "projekt") {
+        // Ett nytt projekt lades till från fliken Kunder – visa det i projektlistan
+        state.tab = "projekt";
+        history.replaceState(null, "", "#/projekt");
+      }
+      if (result === "done" || result === "added") await refresh();
     });
   }
 
@@ -416,7 +638,19 @@ export async function render(container, ctx) {
       renderTab();
       return;
     }
+    const toggle = event.target.closest("[data-toggle-project]");
+    if (toggle) {
+      toggleProject(toggle);
+      return;
+    }
+    const openDoc = event.target.closest("[data-open-doc]");
+    if (openDoc) {
+      openDocument(openDoc.dataset.projectId, openDoc.dataset.openDoc);
+      return;
+    }
     if (!admin) return;
+    const deleteDoc = event.target.closest("[data-delete-doc]");
+    if (deleteDoc) deleteDocument(deleteDoc.dataset.projectId, deleteDoc.dataset.deleteDoc);
     if (event.target.closest("[data-new-customer]")) customerDialog();
     if (event.target.closest("[data-new-project]")) projectDialog();
     const editCustomer = event.target.closest("[data-edit-customer]");
@@ -425,11 +659,29 @@ export async function render(container, ctx) {
     if (editProject) projectDialog(state.projects.find((p) => p.id === editProject.dataset.editProject));
   });
 
+  container.addEventListener("change", (event) => {
+    if (admin && event.target.matches("[data-add-docs]")) addDocuments(event.target);
+  });
+
+  // Länk från Tidrapporten: fäll ut projektet och visa det även om filtret annars döljer det
+  const linked = withProjects && tab === "projekt" && action && action !== "ny" ? state.projects.find((p) => p.id === action) : null;
+  if (linked) {
+    state.open.add(linked.id);
+    if (linked.status !== state.status) state.status = "all";
+    history.replaceState(null, "", "#/projekt");
+  }
+
   renderTab();
+
+  if (linked) {
+    const toggle = content.querySelector(`[data-toggle-project="${CSS.escape(linked.id)}"]`);
+    toggle?.scrollIntoView({ block: "start" });
+    toggle?.focus({ preventScroll: true });
+  }
 
   // Länkar från Kom igång: öppna formuläret direkt och städa adressen
   if (admin && action === "ny") {
-    history.replaceState(null, "", state.tab === "kunder" ? "#/projekt/kunder" : "#/projekt");
+    history.replaceState(null, "", state.tab === "kunder" && withProjects ? "#/projekt/kunder" : "#/projekt");
     if (state.tab === "kunder") customerDialog();
     else projectDialog();
   }

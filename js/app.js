@@ -3,10 +3,11 @@ import * as store from "./store.js";
 import { ROUTES, HOME } from "./routes.js";
 import { hasRole } from "./auth.js";
 import { html, setHTML } from "./lib/html.js";
-import { emptyState } from "./lib/ui.js";
+import { emptyState, closeAllDialogs } from "./lib/ui.js";
 import { renderShell, updateBadges } from "./views/shell.js";
 import { allowed } from "./views/guard.js";
 import { initTheme, themeToggle } from "./theme.js";
+import { DEMO_MODE } from "./config.js";
 
 // Temat sätts först, innan något ritas
 initTheme();
@@ -33,6 +34,8 @@ function redirect(name) {
 // Bestämmer vart användaren ska skickas innan en vy ritas
 function resolveRedirect(name, definition, session, setupNeeded) {
   if (name === "stilguide") return null;
+  // Testversionen: Logga in och Skapa konto går alltid att växla mellan
+  if (DEMO_MODE && !session && (name === "login" || name === "signup")) return null;
   if (setupNeeded) return name === "signup" ? null : "signup";
   if (name === "signup") return session ? HOME : "login";
   if (!definition) return session ? HOME : "login";
@@ -58,9 +61,9 @@ async function route() {
 
     cleanup?.();
     cleanup = null;
-    document.title = settings.companyName
-      ? `${definition.title} – Tidla · ${settings.companyName}`
-      : `${definition.title} – Tidla`;
+    closeAllDialogs();
+    const title = definition.titleFor?.(settings) ?? definition.title;
+    document.title = settings.companyName ? `${title} – Tidla · ${settings.companyName}` : `${title} – Tidla`;
 
     const ctx = {
       user: session,

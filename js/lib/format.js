@@ -88,3 +88,35 @@ export function firstName(name) {
 export function plural(count, one, many) {
   return `${formatInteger(count)} ${count === 1 ? one : many}`;
 }
+
+// Förslag på nästa lediga nummer (kund, projekt, anställd): det högsta talet i slutet av ett befintligt
+// nummer plus 1, med samma början och lika många siffror. ["100", "200"] → "201", ["P-101", "P-099"] → "P-102",
+// ["007"] → "008", [] → first. Nummer utan siffror i slutet räknas inte.
+export function nextNumber(values, first = "1") {
+  const taken = new Set(values.map((v) => String(v ?? "").trim().toLowerCase()));
+  let best = null;
+  for (const value of values) {
+    const match = String(value ?? "").trim().match(/^(.*?)(\d+)$/);
+    if (match && (!best || Number(match[2]) > Number(best[2]))) best = match;
+  }
+  if (!best) return taken.has(first.toLowerCase()) ? nextNumber([first]) : first;
+  let number = Number(best[2]);
+  let candidate;
+  do {
+    number += 1;
+    candidate = `${best[1]}${String(number).padStart(best[2].length, "0")}`;
+  } while (taken.has(candidate.toLowerCase()));
+  return candidate;
+}
+
+// Enheter som böjs i plural. Förkortningar (st, kg, förp …) och "liter", "par" är samma i plural.
+const UNIT_PLURALS = { rulle: "rullar", tub: "tuber", flaska: "flaskor", påse: "påsar", hink: "hinkar", burk: "burkar", låda: "lådor", rör: "rör" };
+
+// 2 → "2 tuber", 1 → "1 tub", 0.5 → "0,5 tub", 2.5 → "2,5 kg" (enheten böjs när antalet är större än 1)
+export function formatQuantity(quantity, unit) {
+  const number = String(formatAmount(quantity)).replace(/,00$/, "").replace(/(,\d)0$/, "$1");
+  const name = String(unit ?? "").trim();
+  const plain = name.toLowerCase();
+  const word = Number(quantity) > 1 && UNIT_PLURALS[plain] ? UNIT_PLURALS[plain] : name;
+  return `${number} ${word}`.trim();
+}

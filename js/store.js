@@ -14,7 +14,8 @@
 // ==========================================================================
 
 import { hashPassword, verifyPassword, createSalt, createOneTimePassword, MIN_PASSWORD_LENGTH } from "./auth.js";
-import { WEEKDAYS, isValidISODate, isValidMonth, monthOf, weekdayKey, today } from "./lib/dates.js";
+import { WEEKDAYS, isValidISODate, isValidMonth, monthOf, weekdayKey, today, addDays } from "./lib/dates.js";
+import { schedulePeriods, weekOn, withPeriod } from "./lib/schedule.js";
 
 const PREFIX = "tidla:";
 export const SCHEMA_VERSION = 1;
@@ -193,6 +194,45 @@ function migrateProjectNumbers() {
   );
 }
 
+// Fordon: förmånsbil bensin och diesel blev en rad ("Förmånsbil"), och Skatteverkets belopp är förval.
+// - De gamla typerna finns kvar för äldre registreringar men markeras retired (dolda, kan inte väljas).
+// - Fordon utan eget belopp får Skatteverkets aktuella förval (VEHICLE_RATES). Egna belopp rörs aldrig.
+// Körs vid varje start, så att nya förval följer med när VEHICLE_RATES uppdateras.
+function migrateVehicles() {
+  const saved = read("settings", null);
+  if (!saved || !Array.isArray(saved.vehicleTypes)) return;
+  const before = JSON.stringify(saved.vehicleTypes);
+  const types = saved.vehicleTypes.map((t) => ({ ...t }));
+
+  const old = types.filter((t) => ["forman-bensin", "forman-diesel"].includes(t.id));
+  if (old.length && !types.some((t) => t.id === "forman")) {
+    const standard = STANDARD_VEHICLES.find((v) => v.id === "forman");
+    // Ett gemensamt eget belopp följer med – annars gäller förvalet
+    const ownRates = [...new Set(old.filter(isCustomRate).map((t) => t.ratePerMil))];
+    const forman = { ...standard, ...defaultRate("forman"), hidden: old.every((t) => t.hidden) };
+    if (ownRates.length === 1) Object.assign(forman, { ratePerMil: ownRates[0], rateYear: Number(today().slice(0, 4)), rateCustom: true });
+    types.splice(types.indexOf(old[0]), 0, forman);
+  }
+  old.forEach((t) => Object.assign(t, { hidden: true, retired: true }));
+
+  for (const t of types) {
+    if (t.isCompanyCar) {
+      Object.assign(t, { ratePerMil: null, rateYear: null, rateCustom: false });
+      continue;
+    }
+    const custom = isCustomRate(t);
+    const standard = VEHICLE_RATES.perMil[t.id];
+    if (custom) {
+      Object.assign(t, { rateCustom: true, rateYear: t.rateYear ?? (t.ratePerMil === null ? null : Number(today().slice(0, 4))) });
+    } else if (standard !== undefined) {
+      Object.assign(t, { ratePerMil: standard, rateYear: Math.max(t.rateYear ?? 0, VEHICLE_RATES.year), rateCustom: false });
+    } else {
+      Object.assign(t, { rateYear: t.rateYear ?? null, rateCustom: false });
+    }
+  }
+  if (JSON.stringify(types) !== before) write("settings", { ...saved, vehicleTypes: types });
+}
+
 // Appen hette tidigare Tidra och nycklarna började med "tidra:". Flyttas en gång till "tidla:".
 // Rör bara de egna nycklarna – aldrig prototypens tk-*.
 const OLD_PREFIX = "tidra:";
@@ -224,6 +264,7 @@ export async function init() {
   migrateTimeTypes();
   migrateTravelAndOvertime();
   migrateMaterials();
+  migrateVehicles();
   if (!initialized && typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
       if (event.key?.startsWith(PREFIX)) emitChange(event.key.slice(PREFIX.length));
@@ -401,8 +442,8 @@ export const HOUR_STEPS = [0.25, 0.5, 1];
 
 /* ---------- Typer av tid ----------
    Varje registrering har en typ:
-     work     Arbete                              – kräver kund och projekt
-     overtime Övertid – komptid / Övertid – lön   – kräver kund och projekt, räknas utöver schemat
+     work     Arbete                              – kräver kund och projekt (bara kund om projekt är avstängt)
+     overtime Övertid – komptid / Övertid – lön   – som arbete, räknas utöver schemat
      absence  frånvarotyper                       – ingen kund, inget projekt, ingen resa
    Restid och milersättning är en del av registreringen (travelHours, travelBillable, fordon).
    Vilka övertidsval som syns och hur restid fungerar styrs av admin (settings.overtime, settings.travel). */
@@ -442,6 +483,13 @@ function defaultOvertime() {
   return { mode: "both", factor: null };
 }
 
+// Av: tid och uttag rapporteras direkt på en kund (customerId) i stället för på ett projekt
+function defaultProjects() {
+  return { enabled: true };
+}
+
+const projectsEnabled = (settings = settingsRecord()) => settings.projects?.enabled !== false;
+
 function defaultTravel() {
   return { enabled: true, billableDefault: false, employeeCanChangeBilling: true, countsTowardSchedule: false };
 }
@@ -470,19 +518,47 @@ function defaultSettings() {
     timeTypes: defaultTimeTypes(),
     overtime: defaultOvertime(),
     travel: defaultTravel(),
+    projects: defaultProjects(),
     materials: defaultMaterials(),
-    // Senaste datum då admin kontrollerade milersättningen mot Skatteverket (påminnelse vid nytt år)
+    // Senaste datum då admin kontrollerade milersättningen mot Skatteverket
     ratesCheckedAt: null,
-    // Beloppen lämnas tomma – de ska kontrolleras mot Skatteverkets aktuella belopp
-    vehicleTypes: [
-      { id: "firmabil", name: "Firmabil", isCompanyCar: true, ratePerMil: null, hidden: false },
-      { id: "privat-bil", name: "Privat bil", isCompanyCar: false, ratePerMil: null, hidden: false },
-      { id: "forman-bensin", name: "Förmånsbil – bensin", isCompanyCar: false, ratePerMil: null, hidden: false },
-      { id: "forman-diesel", name: "Förmånsbil – diesel", isCompanyCar: false, ratePerMil: null, hidden: false },
-      { id: "forman-el", name: "Förmånsbil – el", isCompanyCar: false, ratePerMil: null, hidden: false },
-      { id: "motorcykel", name: "Motorcykel", isCompanyCar: false, ratePerMil: null, hidden: false },
-    ],
+    // Steg 1 i Kom igång. Nya konton börjar med false; äldre konton saknar nyckeln och räknas som klara.
+    companyReviewed: true,
+    vehicleTypes: STANDARD_VEHICLES.map((v) => ({ ...v, ...defaultRate(v.id) })),
   };
+}
+
+/* ---------- Fordon och milersättning ----------
+   Skatteverkets skattefria belopp per mil. Ändra här när Skatteverket ändrar beloppen (vid årsskiftet).
+   Förvalen följer med automatiskt till fordon där admin inte har skrivit ett eget belopp – egna belopp
+   skrivs aldrig över (se migrateVehicles). Varje fordon sparar vilket år beloppet gäller (rateYear). */
+export const VEHICLE_RATES = {
+  year: 2026,
+  url: "https://www.skatteverket.se/privat/skatter/beloppochprocent/2026.4.1522bf3f19aea8075ba21.html",
+  perMil: { "privat-bil": 25, forman: 12, "forman-el": 9.5 },
+};
+
+// Bara firmabil och privat bil syns från början – övriga lägger admin till under Inställningar.
+// Förmånsbil (bensin, diesel, laddhybrid) har samma belopp och är därför en rad.
+export const STANDARD_VEHICLES = [
+  { id: "firmabil", name: "Firmabil", isCompanyCar: true, hidden: false },
+  { id: "privat-bil", name: "Privat bil", isCompanyCar: false, hidden: false },
+  { id: "forman", name: "Förmånsbil", isCompanyCar: false, hidden: true },
+  { id: "forman-el", name: "Förmånsbil – el", isCompanyCar: false, hidden: true },
+  { id: "motorcykel", name: "Motorcykel", isCompanyCar: false, hidden: true },
+];
+
+// Förvalt belopp (eller inget) för ett fordon. rateCustom = admin har skrivit ett eget belopp.
+function defaultRate(id) {
+  const rate = VEHICLE_RATES.perMil[id] ?? null;
+  return { ratePerMil: rate, rateYear: rate === null ? null : VEHICLE_RATES.year, rateCustom: false };
+}
+
+// Är beloppet ett eget belopp? Äldre data saknar rateCustom – då är ett ifyllt belopp som skiljer sig från förvalet eget.
+function isCustomRate(vehicle) {
+  if (typeof vehicle.rateCustom === "boolean") return vehicle.rateCustom;
+  const standard = VEHICLE_RATES.perMil[vehicle.id];
+  return vehicle.ratePerMil !== null && vehicle.ratePerMil !== undefined && vehicle.ratePerMil !== standard;
 }
 
 function settingsRecord() {
@@ -538,6 +614,9 @@ export async function saveSettings(patch) {
       allowFreeText: Boolean(materials.allowFreeText),
     };
   }
+  if ("projects" in patch) {
+    next.projects = { enabled: Boolean(patch.projects?.enabled) };
+  }
   if ("travel" in patch) {
     const travel = patch.travel ?? {};
     next.travel = {
@@ -548,13 +627,15 @@ export async function saveSettings(patch) {
     };
   }
   fail(errors);
+  if ("companyName" in patch || "workWeek" in patch) next.companyReviewed = true;
   write("settings", next);
   return copy(next);
 }
 
-// Byta namn på eller dölja en typ av tid, eller lägga till en ny frånvarotyp.
-// Typer tas aldrig bort – de kan finnas i historiken. "Arbete" kan inte döljas.
-export async function saveTimeType({ id, name, hidden = false }) {
+// Byta namn på eller dölja en typ av tid, eller lägga till en ny typ:
+//   category "absence" = frånvaro, "work" = arbetstid utan kund och projekt (t.ex. utbildning) – placeless
+// Typer tas aldrig bort – de kan finnas i historiken. Grundtypen "Arbete" kan inte döljas.
+export async function saveTimeType({ id, name, hidden = false, category = "absence" }) {
   requireAdmin();
   const settings = settingsRecord();
   const errors = {};
@@ -565,38 +646,93 @@ export async function saveTimeType({ id, name, hidden = false }) {
   if (types.some((t) => t.id !== id && lower(t.name) === cleanName.toLowerCase())) {
     errors.name = "Namnet används redan.";
   }
-  if (existing?.category === "work" && hidden) errors.hidden = "Arbete kan inte döljas.";
+  if (existing?.category === "work" && !existing.placeless && hidden) errors.hidden = "Arbete kan inte döljas.";
   fail(errors);
 
   if (existing) Object.assign(existing, { name: cleanName, hidden: Boolean(hidden) });
+  else if (category === "work") types.push(type(newId(), cleanName, "work", { placeless: true, hidden: Boolean(hidden) }));
   else types.push(type(newId(), cleanName, "absence", { hidden: Boolean(hidden) }));
   write("settings", { ...settings, timeTypes: types });
   return copy(types);
 }
 
-export async function saveVehicleType({ id, name, ratePerMil = null, hidden = false }) {
+// Belopp per mil: tomt = null, annars kronor med högst två decimaler
+function ratePerMil(errors, field, value) {
+  if (value === null || value === "" || value === undefined) return null;
+  const rate = Number(value);
+  if (!Number.isFinite(rate) || rate < 0 || rate > 10000 || !hasTwoDecimals(rate)) {
+    errors[field] = "Ange ett belopp i kronor, t.ex. 25 eller 12,50.";
+  }
+  return rate;
+}
+
+// Nytt belopp på ett fordon. Samma som Skatteverkets förval = följer förvalet även i fortsättningen.
+// Firmabil har aldrig något belopp – företaget står för kostnaden.
+function applyRate(vehicle, rate) {
+  if (vehicle.isCompanyCar) return Object.assign(vehicle, { ratePerMil: null, rateYear: null, rateCustom: false });
+  const standard = VEHICLE_RATES.perMil[vehicle.id];
+  if (standard !== undefined && rate === standard) {
+    const year = Math.max(vehicle.rateCustom ? 0 : vehicle.rateYear ?? 0, VEHICLE_RATES.year);
+    return Object.assign(vehicle, { ratePerMil: rate, rateYear: year, rateCustom: false });
+  }
+  if (rate === vehicle.ratePerMil && vehicle.rateCustom) return vehicle;
+  return Object.assign(vehicle, { ratePerMil: rate, rateYear: rate === null ? null : Number(today().slice(0, 4)), rateCustom: true });
+}
+
+// Byta namn på, dölja/visa eller lägga till ett fordon (id saknas = nytt eget fordon)
+export async function saveVehicleType({ id, name, ratePerMil: rateValue = null, hidden = false }) {
   requireAdmin();
   const settings = settingsRecord();
   const errors = {};
   const cleanName = text(errors, "name", name, { required: true, max: 40, label: "Namnet" });
-  let rate = null;
-  if (ratePerMil !== null && ratePerMil !== "" && ratePerMil !== undefined) {
-    rate = Number(ratePerMil);
-    if (!Number.isFinite(rate) || rate < 0 || rate > 10000 || !hasTwoDecimals(rate)) {
-      errors.ratePerMil = "Ange ett belopp i kronor, t.ex. 25 eller 12,50.";
-    }
-  }
+  const rate = ratePerMil(errors, "ratePerMil", rateValue);
   const types = settings.vehicleTypes.map((t) => ({ ...t }));
   const existing = id ? types.find((t) => t.id === id) : null;
   if (id && !existing) throw notFound("Fordonstypen");
-  if (types.some((t) => t.id !== id && lower(t.name) === cleanName.toLowerCase())) {
+  if (types.some((t) => t.id !== id && !t.retired && lower(t.name) === cleanName.toLowerCase())) {
     errors.name = "Namnet används redan.";
   }
   fail(errors);
-  const rateChanged = existing ? existing.ratePerMil !== rate : rate !== null;
-  if (existing) Object.assign(existing, { name: cleanName, ratePerMil: rate, hidden: Boolean(hidden) });
-  else types.push({ id: newId(), name: cleanName, isCompanyCar: false, ratePerMil: rate, hidden: Boolean(hidden) });
-  write("settings", { ...settings, vehicleTypes: types, ratesCheckedAt: rateChanged ? today() : settings.ratesCheckedAt ?? null });
+  if (existing) {
+    Object.assign(existing, { name: cleanName, hidden: Boolean(hidden) });
+    if (existing.ratePerMil !== rate) applyRate(existing, rate);
+  } else {
+    types.push(applyRate({ id: newId(), name: cleanName, isCompanyCar: false, ratePerMil: null, hidden: Boolean(hidden) }, rate));
+  }
+  write("settings", { ...settings, vehicleTypes: types });
+  return copy(types);
+}
+
+// Belopp för flera fordon på en gång (redigera i listan): { fordons-id: belopp eller "" }
+// Fältfelen heter rate-<fordons-id>.
+export async function saveVehicleRates(rates) {
+  requireAdmin();
+  const settings = settingsRecord();
+  const errors = {};
+  const types = settings.vehicleTypes.map((t) => ({ ...t }));
+  const changes = [];
+  for (const [id, value] of Object.entries(rates ?? {})) {
+    const vehicle = types.find((t) => t.id === id);
+    if (!vehicle) throw notFound("Fordonstypen");
+    changes.push([vehicle, ratePerMil(errors, `rate-${id}`, value)]);
+  }
+  fail(errors, "Kontrollera beloppen.");
+  for (const [vehicle, rate] of changes) {
+    if (vehicle.ratePerMil !== rate) applyRate(vehicle, rate);
+  }
+  write("settings", { ...settings, vehicleTypes: types });
+  return copy(types);
+}
+
+// "Jag har kontrollerat beloppen": beloppen gäller i år också
+export async function confirmVehicleRates() {
+  requireAdmin();
+  const settings = settingsRecord();
+  const year = Number(today().slice(0, 4));
+  const types = settings.vehicleTypes.map((t) =>
+    t.ratePerMil === null || t.ratePerMil === undefined ? t : { ...t, rateYear: Math.max(t.rateYear ?? 0, year) },
+  );
+  write("settings", { ...settings, vehicleTypes: types, ratesCheckedAt: today() });
   return copy(types);
 }
 
@@ -641,7 +777,7 @@ export async function completeSetup({ companyName, orgNumber: org, workWeek: wee
     updatedAt: now,
     activatedAt: now,
   };
-  write("settings", { ...defaultSettings(), companyName: company, orgNumber: cleanOrg, workWeek: cleanWeek });
+  write("settings", { ...defaultSettings(), companyName: company, orgNumber: cleanOrg, workWeek: cleanWeek, companyReviewed: false });
   write("users", [user]);
   writeSession(user.id, false);
   return publicUser(user);
@@ -741,6 +877,9 @@ export async function saveUser(data) {
   const role = data.role === "admin" ? "admin" : data.role === "employee" ? "employee" : null;
   if (!role) errors.role = "Välj en roll.";
   const schedule = data.schedule ? workWeek(errors, "schedule", data.schedule) : null;
+  // Ett ändrat schema gäller från ett valt datum (förval idag) – äldre veckor behåller schemat som gällde då
+  const scheduleFrom = data.scheduleFrom ? String(data.scheduleFrom) : today();
+  if (!isValidISODate(scheduleFrom)) errors.scheduleFrom = "Välj ett giltigt datum.";
 
   const others = users.filter((u) => u.id !== data.id);
   if (employeeNo && others.some((u) => lower(u.employeeNo) === employeeNo.toLowerCase())) {
@@ -755,7 +894,16 @@ export async function saveUser(data) {
 
   const now = Date.now();
   if (existing) {
-    Object.assign(existing, { name, employeeNo, email: mail, phone, title, role, schedule, updatedAt: now });
+    const changed = JSON.stringify(weekOn(existing, scheduleFrom, null)) !== JSON.stringify(schedule);
+    if (changed) {
+      // Utan registreringar finns ingen historik att skydda – då gäller schemat från början
+      const hasEntries = all("entries").some((e) => e.userId === existing.id);
+      existing.schedulePeriods = withPeriod(existing, hasEntries ? scheduleFrom : null, schedule);
+      existing.schedule = schedule;
+    } else {
+      existing.schedulePeriods = schedulePeriods(existing);
+    }
+    Object.assign(existing, { name, employeeNo, email: mail, phone, title, role, updatedAt: now });
     write("users", users);
     return { user: publicUser(existing), oneTimePassword: null };
   }
@@ -772,6 +920,7 @@ export async function saveUser(data) {
     role,
     status: "pending",
     schedule,
+    schedulePeriods: schedule ? [{ from: null, week: schedule }] : [],
     passwordHash: await hashPassword(oneTimePassword, salt),
     salt,
     mustChangePassword: true,
@@ -842,18 +991,19 @@ export async function deleteUser(id) {
 
 /* ---------- Schema ---------- */
 
-function scheduleFor(user, settings = settingsRecord()) {
-  return user?.schedule ?? settings.workWeek;
+// Veckoschemat som gällde ett visst datum (eget schema i perioder, annars företagets)
+function scheduleOn(user, date, settings = settingsRecord()) {
+  return weekOn(user, date, settings.workWeek);
 }
 
-// Programmerad tid en viss dag (egen, eller valfri anställd för admin)
+// Tid enligt schema en viss dag (egen, eller valfri anställd för admin)
 export async function getScheduledHours(date, userId) {
   const me = requireUser();
   const targetId = userId ?? me.id;
   if (me.role !== "admin" && targetId !== me.id) throw new StoreError("forbidden", "Du kan bara se ditt eget schema.");
   const user = all("users").find((u) => u.id === targetId);
   if (!user) throw notFound("Den anställde");
-  return scheduleFor(user)[weekdayKey(date)] ?? 0;
+  return scheduleOn(user, date)[weekdayKey(date)] ?? 0;
 }
 
 export async function getWorkWeek(userId) {
@@ -862,7 +1012,7 @@ export async function getWorkWeek(userId) {
   if (me.role !== "admin" && targetId !== me.id) throw new StoreError("forbidden", "Du kan bara se ditt eget schema.");
   const user = all("users").find((u) => u.id === targetId);
   if (!user) throw notFound("Den anställde");
-  return copy(scheduleFor(user));
+  return copy(scheduleOn(user, today()));
 }
 
 /* ==========================================================================
@@ -917,7 +1067,7 @@ export async function setCustomerArchived(id, archived) {
   return copy(customer);
 }
 
-// Kunder med projekt kan inte raderas, bara arkiveras (registreringar hänger på projekten)
+// Kunder med projekt eller registreringar kan inte raderas, bara arkiveras
 export async function deleteCustomer(id) {
   requireAdmin();
   const customers = all("customers");
@@ -925,12 +1075,23 @@ export async function deleteCustomer(id) {
   if (all("projects").some((p) => p.customerId === id)) {
     throw new StoreError("in-use", "Kunden har projekt och kan bara arkiveras.");
   }
+  if (all("entries").some((e) => e.customerId === id) || all("materials").some((m) => m.customerId === id)) {
+    throw new StoreError("in-use", "Kunden har registreringar och kan bara arkiveras.");
+  }
   write("customers", customers.filter((c) => c.id !== id));
 }
 
 /* ==========================================================================
    Projekt
    ========================================================================== */
+
+const isSelectableCustomer = (customer) => Boolean(customer) && !customer.archived;
+
+// Kunden som en tidrad eller ett uttag hör till: projektets kund, annars customerId (rad utan projekt)
+function customerIdOf(row, projects) {
+  if (!row.projectId) return row.customerId ?? null;
+  return projects.find((p) => p.id === row.projectId)?.customerId ?? null;
+}
 
 function isSelectableProject(project, customers) {
   if (!project || project.archived || project.status !== "open") return false;
@@ -978,6 +1139,10 @@ export async function saveProject(data) {
     projectNo: text(errors, "projectNo", data.projectNo, { required: true, max: 30, label: "Projektnummer" }),
     name: text(errors, "name", data.name, { required: true, max: 120, label: "Projektnamn" }),
     address: text(errors, "address", data.address, { max: 200, label: "Projektadress" }),
+    contactName: text(errors, "contactName", data.contactName, { max: 120, label: "Kontaktperson" }),
+    contactPhone: text(errors, "contactPhone", data.contactPhone, { max: 30, label: "Telefon" }),
+    contactEmail: email(errors, "contactEmail", data.contactEmail),
+    description: text(errors, "description", data.description, { max: 4000, label: "Beskrivningen" }),
     status: data.status === "closed" ? "closed" : "open",
   };
   if (record.projectNo && projects.some((p) => p.id !== data.id && lower(p.projectNo) === record.projectNo.toLowerCase())) {
@@ -988,7 +1153,7 @@ export async function saveProject(data) {
   const now = Date.now();
   record.closedAt = record.status === "closed" ? (existing?.status === "closed" ? existing.closedAt : today()) : null;
   if (existing) Object.assign(existing, record, { updatedAt: now });
-  else projects.push({ id: newId(), ...record, archived: false, createdAt: now, updatedAt: now });
+  else projects.push({ id: newId(), ...record, documents: [], archived: false, createdAt: now, updatedAt: now });
   write("projects", projects);
   return copy(existing ?? projects[projects.length - 1]);
 }
@@ -1024,7 +1189,116 @@ export async function deleteProject(id) {
   if (all("entries").some((e) => e.projectId === id) || all("materials").some((m) => m.projectId === id)) {
     throw new StoreError("in-use", "Projektet har registreringar och kan bara avslutas eller arkiveras.");
   }
+  const documents = projects.find((p) => p.id === id).documents ?? [];
   write("projects", projects.filter((p) => p.id !== id));
+  await removeFiles(documents.map((d) => d.id)).catch(() => {});
+}
+
+/* ---------- Projektdokument (ritningar, arbetsordrar …) ----------
+   Filerna ligger i IndexedDB – localStorage rymmer inte ritningar. Listan över dem ligger på projektet
+   (project.documents). Säkerhetskopian innehåller bara listan, inte filerna.
+   Fas 2: filerna laddas upp till servern i stället. */
+
+const FILE_DB = "tidla-files";
+const FILE_STORE = "files";
+export const MAX_DOCUMENT_SIZE = 20 * 1024 * 1024;
+let fileDbPromise = null;
+
+const fileStorageError = () =>
+  new StoreError("storage", "Det gick inte att spara filen. Webbläsarens lagring kan vara full eller avstängd.");
+
+function fileDb() {
+  if (!globalThis.indexedDB) return Promise.reject(fileStorageError());
+  fileDbPromise ??= new Promise((resolve, reject) => {
+    const request = globalThis.indexedDB.open(FILE_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(FILE_STORE);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(fileStorageError());
+  }).catch((error) => {
+    fileDbPromise = null;
+    throw error;
+  });
+  return fileDbPromise;
+}
+
+// run(objectStore) får returnera en IDBRequest – dess resultat blir svaret
+async function fileTransaction(mode, run) {
+  const db = await fileDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(FILE_STORE, mode);
+    const request = run(tx.objectStore(FILE_STORE));
+    tx.oncomplete = () => resolve(request?.result);
+    tx.onerror = tx.onabort = () => reject(fileStorageError());
+  });
+}
+
+const removeFiles = (ids) =>
+  ids.length ? fileTransaction("readwrite", (files) => ids.forEach((id) => files.delete(id))) : Promise.resolve();
+
+// Medarbetare ser inte arkiverade projekt (eller projekt hos arkiverade kunder)
+function visibleProject(id) {
+  const me = requireUser();
+  const project = all("projects").find((p) => p.id === id);
+  const customer = project && all("customers").find((c) => c.id === project.customerId);
+  if (!project || (me.role !== "admin" && (project.archived || customer?.archived))) throw notFound("Projektet");
+  return project;
+}
+
+// files: File-objekt från ett <input type="file">
+export async function addProjectDocuments(projectId, files) {
+  requireAdmin();
+  visibleProject(projectId);
+  const list = [...(files ?? [])];
+  if (!list.length) throw new StoreError("validation", "Välj minst en fil.");
+  const tooBig = list.find((f) => f.size > MAX_DOCUMENT_SIZE);
+  if (tooBig) throw new StoreError("validation", `${tooBig.name} är för stor. En fil får vara högst 20 MB.`);
+  const empty = list.find((f) => !f.size);
+  if (empty) throw new StoreError("validation", `${empty.name} är tom.`);
+
+  const now = Date.now();
+  const added = list.map((f) => ({
+    id: newId(),
+    name: clean(f.name).slice(0, 200) || "Namnlös fil",
+    type: f.type || "",
+    size: f.size,
+    addedAt: now,
+  }));
+  await fileTransaction("readwrite", (files) => added.forEach((d, i) => files.put(list[i], d.id)));
+
+  const projects = all("projects");
+  const project = projects.find((p) => p.id === projectId);
+  project.documents = [...(project.documents ?? []), ...added];
+  project.updatedAt = now;
+  try {
+    write("projects", projects);
+  } catch (error) {
+    await removeFiles(added.map((d) => d.id)).catch(() => {});
+    throw error;
+  }
+  return copy(project);
+}
+
+export async function deleteProjectDocument(projectId, documentId) {
+  requireAdmin();
+  const projects = all("projects");
+  const project = projects.find((p) => p.id === projectId);
+  if (!project) throw notFound("Projektet");
+  if (!(project.documents ?? []).some((d) => d.id === documentId)) throw notFound("Dokumentet");
+  project.documents = project.documents.filter((d) => d.id !== documentId);
+  project.updatedAt = Date.now();
+  write("projects", projects);
+  await removeFiles([documentId]).catch(() => {});
+  return copy(project);
+}
+
+// Svarar med { name, type, blob }
+export async function getProjectDocument(projectId, documentId) {
+  const project = visibleProject(projectId);
+  const doc = (project.documents ?? []).find((d) => d.id === documentId);
+  if (!doc) throw notFound("Dokumentet");
+  const blob = await fileTransaction("readonly", (files) => files.get(documentId));
+  if (!blob) throw new StoreError("not-found", "Filen finns inte i den här webbläsaren. Be administratören lägga in den igen.");
+  return { name: doc.name, type: doc.type, blob };
 }
 
 /* ==========================================================================
@@ -1036,7 +1310,7 @@ const isMonthLocked = (userId, month) => all("monthLocks").some((l) => l.userId 
 const lockedError = () =>
   new StoreError("locked", "Månaden är markerad som klar och låst. Be administratören låsa upp den.");
 
-// Filter: userId, userIds, date, month, from, to, status (sträng eller lista), customerId, projectId,
+// Filter: userId, userIds, date, month, from, to, status (sträng eller lista), customerId (även via projekt), projectId,
 // timeTypeId, category ("work" | "travel" | "overtime" | "absence", eller lista),
 // kind ("project" = allt utom frånvaro | "absence"). Medarbetare får alltid bara sina egna rader.
 export async function listEntries(filter = {}) {
@@ -1047,9 +1321,7 @@ export async function listEntries(filter = {}) {
     delete f.userIds;
   }
   const statuses = f.status ? [].concat(f.status) : null;
-  const customerProjects = f.customerId
-    ? new Set(all("projects").filter((p) => p.customerId === f.customerId).map((p) => p.id))
-    : null;
+  const projects = f.customerId ? all("projects") : null;
   const typeCategory = new Map(settingsRecord().timeTypes.map((t) => [t.id, t.category]));
   const categories = f.category ? [].concat(f.category) : null;
 
@@ -1064,7 +1336,7 @@ export async function listEntries(filter = {}) {
         if (f.to && e.date > f.to) return false;
         if (statuses && !statuses.includes(e.status)) return false;
         if (f.projectId && e.projectId !== f.projectId) return false;
-        if (customerProjects && !customerProjects.has(e.projectId)) return false;
+        if (f.customerId && customerIdOf(e, projects) !== f.customerId) return false;
         const category = typeCategory.get(e.timeTypeId);
         if (f.timeTypeId && e.timeTypeId !== f.timeTypeId) return false;
         if (categories && !categories.includes(category)) return false;
@@ -1111,6 +1383,7 @@ export async function saveEntry(data) {
   if (!validHours(hours)) errors.hours = "Ange 0–24 timmar.";
 
   let projectId = data.projectId || null;
+  let customerId = null;
   // Utan typ blir det vanligt arbete
   const timeTypeId = data.timeTypeId || defaultWorkType(settings).id;
   const timeType = settings.timeTypes.find((t) => t.id === timeTypeId);
@@ -1130,18 +1403,30 @@ export async function saveEntry(data) {
   let travelHours = 0;
   let travelBillable = false;
 
-  if (timeType?.category === "absence") {
-    // Frånvaro: ingen kund, inget projekt och inget fordon
+  if (timeType?.category === "absence" || timeType?.placeless) {
+    // Frånvaro, och arbetstid utan kund (t.ex. utbildning): ingen kund, inget projekt och inget fordon
     projectId = null;
   } else {
-    if (!projectId) {
-      errors.projectId = "Välj kund och projekt, eller en typ av frånvaro.";
-    } else {
-      const project = projects.find((p) => p.id === projectId);
-      const keepsOld = project && existing?.projectId === projectId;
-      if (!isSelectableProject(project, customers) && !keepsOld) {
-        errors.projectId = "Projektet går inte att välja. Det kan vara avslutat eller arkiverat.";
+    if (projectsEnabled(settings)) {
+      if (!projectId) {
+        errors.projectId = "Välj kund och projekt, eller en typ av frånvaro.";
+      } else {
+        const project = projects.find((p) => p.id === projectId);
+        const keepsOld = project && existing?.projectId === projectId;
+        if (!isSelectableProject(project, customers) && !keepsOld) {
+          errors.projectId = "Projektet går inte att välja. Det kan vara avslutat eller arkiverat.";
+        }
       }
+    } else {
+      // Utan projekt rapporteras tiden direkt på kunden
+      customerId = data.customerId || null;
+      const customer = customers.find((c) => c.id === customerId);
+      const keepsOld = Boolean(customer) && Boolean(existing) && customerIdOf(existing, projects) === customerId;
+      if (!customerId) errors.customerId = "Välj en kund, eller en typ av frånvaro.";
+      else if (!isSelectableCustomer(customer) && !keepsOld) errors.customerId = "Kunden går inte att välja. Den kan vara arkiverad.";
+      // En äldre rad med projekt på samma kund behåller projektet
+      projectId = keepsOld && existing.projectId ? existing.projectId : null;
+      if (projectId) customerId = null;
     }
 
     travelHours = Number(data.travelHours || 0);
@@ -1201,6 +1486,7 @@ export async function saveEntry(data) {
     date,
     hours,
     projectId,
+    customerId,
     timeTypeId,
     travelHours,
     travelBillable,
@@ -1219,6 +1505,67 @@ export async function saveEntry(data) {
   else entries.push({ id: newId(), ...record, createdAt: now });
   write("entries", entries);
   return copy(existing ?? entries[entries.length - 1]);
+}
+
+// Frånvaro för flera dagar på en gång (t.ex. en veckas semester): en rad per arbetsdag enligt schemat,
+// med schemats timmar. Dagar som redan har registreringar hoppas över. Allt sparas – eller inget.
+// Returnerar { saved: [rader], skipped: [datum som redan hade tid] }.
+const MAX_ABSENCE_DAYS = 62;
+
+export async function saveAbsenceRange({ from, to, timeTypeId, comment = "" }) {
+  const me = requireUser();
+  const settings = settingsRecord();
+  const errors = {};
+  if (!isValidISODate(from)) errors.date = "Välj ett giltigt datum.";
+  if (!isValidISODate(to)) errors.to = "Välj ett giltigt datum.";
+  else if (!errors.date && to < from) errors.to = "Till och med kan inte vara före första dagen.";
+  const timeType = settings.timeTypes.find((t) => t.id === timeTypeId);
+  if (!timeType || timeType.category !== "absence" || timeType.hidden) errors.timeTypeId = "Välj en typ av frånvaro.";
+  const cleanComment = text(errors, "comment", comment, { max: 500, label: "Kommentaren" });
+  fail(errors);
+
+  const dates = [];
+  for (let date = from; date <= to; date = addDays(date, 1)) {
+    dates.push(date);
+    if (dates.length > MAX_ABSENCE_DAYS) throw new StoreError("validation", `Högst ${MAX_ABSENCE_DAYS} dagar åt gången.`, { to: `Högst ${MAX_ABSENCE_DAYS} dagar åt gången.` });
+  }
+  const hoursOn = (date) => scheduleOn(me, date, settings)[weekdayKey(date)] ?? 0;
+  const entries = all("entries");
+  const workDays = dates.filter((date) => hoursOn(date) > 0);
+  if (!workDays.length) {
+    throw new StoreError("validation", "Det finns inga arbetsdagar enligt schemat i perioden.", { to: "Inga arbetsdagar enligt schemat." });
+  }
+  if (workDays.some((date) => isMonthLocked(me.id, monthOf(date)))) throw lockedError();
+  const skipped = workDays.filter((date) => entries.some((e) => e.userId === me.id && e.date === date));
+  const toSave = workDays.filter((date) => !skipped.includes(date));
+  if (!toSave.length) {
+    throw new StoreError("validation", "Alla arbetsdagar i perioden har redan registreringar.", { to: "Alla dagar har redan tid." });
+  }
+
+  const now = Date.now();
+  const saved = toSave.map((date) => ({
+    id: newId(),
+    userId: me.id,
+    date,
+    hours: hoursOn(date),
+    projectId: null,
+    customerId: null,
+    timeTypeId,
+    travelHours: 0,
+    travelBillable: false,
+    vehicleTypeId: null,
+    vehicleBasis: null,
+    km: 0,
+    comment: cleanComment,
+    status: "draft",
+    rejectReason: "",
+    reviewedBy: null,
+    reviewedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  }));
+  write("entries", [...entries, ...saved]);
+  return { saved: copy(saved), skipped };
 }
 
 export async function deleteEntry(id) {
@@ -1300,30 +1647,11 @@ export async function unlockMonth(userId, month) {
 export const MATERIAL_LABELS = ["Material", "Produkter", "Förbrukning"];
 export const UNITS = ["st", "förp", "kg", "g", "m", "liter", "ml", "tub", "flaska", "rulle", "par"];
 
-// Startförslag per bransch – admin väljer själv att lägga till dem och ändrar sedan fritt
-export const ARTICLE_TEMPLATES = {
-  bygg: {
-    label: "Bygg",
-    articles: [
-      ["Skruv", "kg"], ["Spik", "kg"], ["Reglar", "st"], ["Gipsskivor", "st"],
-      ["Fogmassa", "tub"], ["Tejp", "rulle"], ["Isolering", "förp"],
-    ],
-  },
-  frisor: {
-    label: "Frisör",
-    articles: [
-      ["Hårfärg", "tub"], ["Oxidant", "ml"], ["Blekmedel", "g"], ["Schampo", "ml"],
-      ["Balsam", "ml"], ["Folie", "st"], ["Handskar", "par"],
-    ],
-  },
-  stad: {
-    label: "Städ",
-    articles: [
-      ["Rengöringsmedel", "liter"], ["Sopsäckar", "st"], ["Mikrofiberdukar", "st"],
-      ["Handskar", "par"], ["Toalettpapper", "förp"], ["Handtvål", "flaska"],
-    ],
-  },
-};
+// Startförslag för bygg – admin väljer själv att lägga till dem och ändrar sedan fritt
+export const ARTICLE_TEMPLATE = [
+  ["Skruv", "kg"], ["Spik", "kg"], ["Reglar", "st"], ["Gipsskivor", "st"], ["Fogmassa", "tub"],
+  ["Tejp", "rulle"], ["Isolering", "förp"], ["Byggplast", "rulle"], ["Spackel", "liter"], ["Sågklingor", "st"],
+];
 
 function defaultMaterials() {
   return { enabled: false, label: "Material", allowFreeText: true };
@@ -1372,15 +1700,13 @@ export async function saveArticle(data) {
   return copy(existing ?? articles[articles.length - 1]);
 }
 
-// Lägger till en branschs startförslag (hoppar över namn som redan finns). Returnerar antal nya.
-export async function addArticleTemplate(key) {
+// Lägger till startförslagen (hoppar över namn som redan finns). Returnerar antal nya.
+export async function addArticleTemplate() {
   requireAdmin();
-  const template = ARTICLE_TEMPLATES[key];
-  if (!template) throw new StoreError("validation", "Okänd bransch.");
   const articles = all("articles");
   const now = Date.now();
   let added = 0;
-  for (const [name, unit] of template.articles) {
+  for (const [name, unit] of ARTICLE_TEMPLATE) {
     if (articles.some((a) => lower(a.name) === name.toLowerCase())) continue;
     articles.push({ id: newId(), name, unit, articleNo: "", hidden: false, createdAt: now, updatedAt: now });
     added++;
@@ -1391,10 +1717,11 @@ export async function addArticleTemplate(key) {
 
 /* ---------- Uttag ---------- */
 
-// Filter: from, to, month, date, handled (true/false), projectId, userId. Medarbetare ser bara egna uttag.
+// Filter: from, to, month, date, handled (true/false), projectId, customerId, userId. Medarbetare ser bara egna uttag.
 export async function listMaterials(filter = {}) {
   const me = requireUser();
   const userId = me.role === "admin" ? filter.userId : me.id;
+  const projects = filter.customerId ? all("projects") : null;
   return copy(
     all("materials")
       .filter((m) => {
@@ -1405,6 +1732,7 @@ export async function listMaterials(filter = {}) {
         if (filter.to && m.date > filter.to) return false;
         if (typeof filter.handled === "boolean" && m.handled !== filter.handled) return false;
         if (filter.projectId && m.projectId !== filter.projectId) return false;
+        if (filter.customerId && customerIdOf(m, projects) !== filter.customerId) return false;
         return true;
       })
       .sort((a, b) => (a.date === b.date ? b.createdAt - a.createdAt : a.date < b.date ? 1 : -1)),
@@ -1440,8 +1768,18 @@ export async function saveMaterial(data) {
     errors.quantity = "Ange ett antal större än 0, t.ex. 2 eller 0,5.";
   }
   const message = text(errors, "message", data.message, { max: 500, label: "Meddelandet" });
-  const project = all("projects").find((p) => p.id === data.projectId);
-  if (!isSelectableProject(project, all("customers"))) errors.projectId = "Välj ett pågående projekt.";
+  // Uttaget hör till ett projekt – eller direkt till en kund när projekt inte används
+  let projectId = null;
+  let customerId = null;
+  if (projectsEnabled()) {
+    const project = all("projects").find((p) => p.id === data.projectId);
+    if (!isSelectableProject(project, all("customers"))) errors.projectId = "Välj ett pågående projekt.";
+    else projectId = project.id;
+  } else {
+    const customer = all("customers").find((c) => c.id === data.customerId);
+    if (!isSelectableCustomer(customer)) errors.customerId = "Välj en kund.";
+    else customerId = customer.id;
+  }
   fail(errors);
 
   const materials = all("materials");
@@ -1453,7 +1791,8 @@ export async function saveMaterial(data) {
     name,
     unit,
     quantity,
-    projectId: project.id,
+    projectId,
+    customerId,
     message,
     handled: false,
     handledBy: null,
@@ -1470,9 +1809,9 @@ export async function deleteMaterial(id) {
   const me = requireUser();
   const materials = all("materials");
   const item = materials.find((m) => m.id === id);
-  if (!item) throw notFound("Uttaget");
-  if (me.role !== "admin" && item.userId !== me.id) throw new StoreError("forbidden", "Du kan bara ta bort dina egna uttag.");
-  if (item.handled) throw new StoreError("locked", "Uttaget är hanterat och kan inte tas bort.");
+  if (!item) throw notFound("Raden");
+  if (me.role !== "admin" && item.userId !== me.id) throw new StoreError("forbidden", "Du kan bara ta bort det du själv har registrerat.");
+  if (item.handled) throw new StoreError("locked", "Raden är markerad som klar och kan inte tas bort.");
   write("materials", materials.filter((m) => m.id !== id));
 }
 
@@ -1481,7 +1820,7 @@ export async function setMaterialsHandled(ids, handled = true) {
   const materials = all("materials");
   const idSet = new Set(ids);
   const targets = materials.filter((m) => idSet.has(m.id));
-  if (!targets.length) throw notFound("Uttagen");
+  if (!targets.length) throw notFound("Raderna");
   const now = Date.now();
   targets.forEach((m) =>
     Object.assign(m, { handled: Boolean(handled), handledBy: handled ? me.id : null, handledAt: handled ? now : null }),
@@ -1537,14 +1876,15 @@ export async function importBackup(backup) {
   migrateTimeTypes();
   migrateTravelAndOvertime();
   migrateMaterials();
+  migrateVehicles();
 
   // Loggas ut om det egna kontot inte finns kvar i kopian
   currentUserRecord();
   return Object.fromEntries(COLLECTIONS.map((name) => [name, data[name].length]));
 }
 
-// Tömmer all data i Tidla och loggar ut (temat behålls). Används bara av testversionens
-// exempelföretag (js/demo/) – finns inte i API:et i fas 2.
+// Tömmer all data i Tidla och loggar ut (temat behålls). Används bara av testversionen
+// (Byt företag och Skapa konto) – finns inte i API:et i fas 2.
 export async function resetAllData() {
   clearSession();
   for (const name of ["schema", "settings", ...COLLECTIONS]) {
@@ -1554,6 +1894,7 @@ export async function resetAllData() {
       /* ignoreras */
     }
   }
+  if (globalThis.indexedDB) await fileTransaction("readwrite", (files) => files.clear()).catch(() => {});
   emitChange("*");
 }
 
@@ -1567,24 +1908,32 @@ function checkCutoff(cutoff) {
   }
 }
 
-// Hur många tidrader som ligger före ett datum
+// Hur mycket som ligger före ett datum: tidrader och material från lagret
 export async function countEntriesBefore(cutoff) {
   requireAdmin();
   checkCutoff(cutoff);
   const old = all("entries").filter((e) => e.date < cutoff);
-  const oldest = old.reduce((min, e) => (!min || e.date < min ? e.date : min), null);
-  return { entries: old.length, oldest };
+  const oldMaterials = all("materials").filter((m) => m.date < cutoff);
+  const oldest = [...old, ...oldMaterials].reduce((min, row) => (!min || row.date < min ? row.date : min), null);
+  return { entries: old.length, materials: oldMaterials.length, oldest };
 }
 
-// Raderar tidrader före datumet och månadslås för hela månader före datumet
+// Raderar tidrader och material från lagret före datumet, och månadslås för hela månader före datumet
 export async function purgeEntriesBefore(cutoff) {
   requireAdmin();
   checkCutoff(cutoff);
   const entries = all("entries");
   const keep = entries.filter((e) => e.date >= cutoff);
+  const materials = all("materials");
+  const keepMaterials = materials.filter((m) => m.date >= cutoff);
   const locks = all("monthLocks");
   const keepLocks = locks.filter((l) => l.month >= monthOf(cutoff));
   write("entries", keep);
+  write("materials", keepMaterials);
   write("monthLocks", keepLocks);
-  return { entries: entries.length - keep.length, monthLocks: locks.length - keepLocks.length };
+  return {
+    entries: entries.length - keep.length,
+    materials: materials.length - keepMaterials.length,
+    monthLocks: locks.length - keepLocks.length,
+  };
 }

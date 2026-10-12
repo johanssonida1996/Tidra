@@ -4,9 +4,10 @@
 // Mobil: veckoremsa mån–fre, kortet "Idag x av y h", formuläret i en kolumn.
 //
 // Formuläret har tre delar som fälls ut och ihop, och en gemensam Spara-knapp under:
-// 1. Registrera arbetstid (utfälld) – kund, projekt, typ av tid, timmar och kommentar
+// 1. Registrera arbetstid (utfälld) – typ av tid först, sedan kund och projekt (döljs vid frånvaro), timmar och kommentar.
+//    Frånvaro kan sparas för flera dagar på en gång ("Till och med").
 // 2. Resa (stängd) – restid och milersättning, sparas på samma rad som arbetstiden
-// 3. Material (stängd, tillval) – ett uttag på samma projekt och datum
+// 3. Material (stängd, tillval) – material från lagret på samma projekt (eller kund) och datum
 // Vad som syns styrs av admins inställningar.
 import * as store from "../store.js";
 import { html, setHTML, raw } from "../lib/html.js";
@@ -16,7 +17,7 @@ import {
   formatShort, formatLong, formatLongLower, formatDayShort, dayOfMonth, isValidISODate,
 } from "../lib/dates.js";
 import {
-  parseHours, formatHours, formatHoursUnit, formatInteger, clamp, roundToStep, firstName, plural,
+  parseHours, formatHours, formatHoursUnit, formatInteger, clamp, roundToStep, firstName, plural, formatQuantity, formatAmount,
 } from "../lib/format.js";
 import {
   field, input, select, textarea, statusPill, emptyState, callout, confirmDialog, notify,
@@ -26,12 +27,22 @@ import { isAdmin } from "../auth.js";
 import { ALL } from "../routes.js";
 import { allowed } from "./guard.js";
 import { updateBadges } from "./shell.js";
+import { placeLabel, projectsOn, mapUrl, telUrl } from "../lib/place.js";
+import { weekOn } from "../lib/schedule.js";
 
 const TYPE_ICONS = { work: "clock", overtime: "overtime", absence: "sun" };
+// Skillnaden mellan komptid och lön, för den som inte vet
+const COMPENSATION_HELP = {
+  leave: "Komptid = du får ledigt motsvarande tid senare.",
+  pay: "Lön = övertiden betalas ut med lönen.",
+};
 // Valet "Annat – skriv själv" i materiallistan
 const OTHER = "__other";
 // Fältnamn i formuläret för materialet (store.saveMaterial använder namnen utan "mat")
 const MATERIAL_FIELDS = { articleId: "matArticleId", name: "matName", unit: "matUnit", quantity: "matQuantity", message: "matMessage" };
+
+// Belopp utan onödiga decimaler: 25 → "25", 9.5 → "9,5", 85.12 → "85,12"
+const formatAmountShort = (value) => formatAmount(value).replace(/,00$/, "").replace(/(,\d)0$/, "$1");
 
 // Hur många minuter ett steg är, i text
 const stepText = (step) => (step === 1 ? "en timme" : `${Math.round(step * 60)} minuter`);
@@ -49,12 +60,16 @@ export async function render(container, ctx) {
   const defaultType = timeTypes.find((t) => t.category === "work")?.id ?? "normal";
   const materials = settings.materials ?? { enabled: false, label: "Material" };
   const materialLabel = materials.label || "Material";
-  const quantityText = (q) => String(q).replace(".", ",");
   // Inget fordon är förvalt – man väljer själv om milersättning ska registreras
   const defaultVehicle = "";
 
+  // Av: tiden rapporteras direkt på kunden, utan projekt
+  const withProjects = projectsOn(settings);
+
   const typeById = (id) => timeTypes.find((t) => t.id === id);
   const isAbsence = (id) => typeById(id)?.category === "absence";
+  // Frånvaro och arbetstid utan kund (t.ex. utbildning) – ingen kund, inget projekt och ingen resa
+  const isPlaceless = (id) => isAbsence(id) || Boolean(typeById(id)?.placeless);
   const isOvertimeType = (id) => typeById(id)?.category === "overtime";
   // Övertidstyper som admin tillåter
   const allowedOvertime = timeTypes.filter(
@@ -79,17 +94,15 @@ export async function render(container, ctx) {
 
   function typeHelp(type) {
     if (!type) return "";
-    if (type.category === "absence") return "Frånvaro kräver ingen kund eller projekt.";
-    if (type.category === "overtime") {
-      return `Räknas utöver schemat och ersätts med ${type.compensation === "leave" ? "komptid (ledighet)" : "lön"}.`;
-    }
+    if (type.category === "absence") return withProjects ? "Frånvaro kräver varken kund eller projekt." : "Frånvaro kräver ingen kund.";
+    if (type.placeless) return withProjects ? "Räknas som arbetstid. Kräver varken kund eller projekt." : "Räknas som arbetstid. Kräver ingen kund.";
+    if (type.category === "overtime") return `Räknas utöver schemat. ${COMPENSATION_HELP[type.compensation] ?? ""}`;
     return "";
   }
 
-  const [customers, projects, workWeek] = await Promise.all([
+  const [customers, projects] = await Promise.all([
     store.listCustomers(),
     store.listProjects({ selectableOnly: true }),
-    store.getWorkWeek(),
   ]);
   // Även avslutade/arkiverade projekt behövs för att visa äldre rader
   const allProjects = await store.listProjects({ includeArchived: isAdmin(me) });
@@ -126,6 +139,8 @@ export async function render(container, ctx) {
       projectId: "",
       timeTypeId: defaultType,
       hours: null,
+      // Sista dagen för frånvaro över flera dagar ("" = bara den valda dagen)
+      to: "",
       travelHours: 0,
       travelBillable: travel.billableDefault,
       vehicleTypeId: defaultVehicle,
@@ -146,7 +161,8 @@ export async function render(container, ctx) {
   const daySum = (date = state.date) => dayEntries(date).reduce((sum, e) => sum + e.hours + (e.travelHours || 0), 0);
   const scheduleSum = (date = state.date) => dayEntries(date).reduce((sum, e) => sum + scheduleHours(e), 0);
   const overtimeSum = (date = state.date) => dayEntries(date).filter(isOvertime).reduce((sum, e) => sum + e.hours, 0);
-  const scheduled = (date = state.date) => workWeek[weekdayKey(date)] ?? 0;
+  // Schemat som gällde den dagen (eget schema i perioder, annars företagets arbetstid)
+  const scheduled = (date = state.date) => weekOn(me, date, settings.workWeek)[weekdayKey(date)] ?? 0;
 
   // Kvar av schemat (utom raden som redigeras)
   function remainingSchedule() {
@@ -184,7 +200,9 @@ export async function render(container, ctx) {
         <div class="page-head__text">
           <div class="eyebrow">Hej, ${firstName(me.name)}</div>
           <h1 class="page-title">Lägg till tid</h1>
-          <p class="page-lead only-desktop">Välj först kund och därefter rätt projekt för arbetet.</p>
+          <p class="page-lead only-desktop">${withProjects
+            ? "Välj typ av tid och sedan kund och projekt. Är du ledig väljer du en typ av frånvaro."
+            : "Välj typ av tid och sedan kund. Är du ledig väljer du en typ av frånvaro."}</p>
           <div class="only-mobile" data-mobile-week></div>
         </div>
         <div class="only-desktop" data-datenav></div>
@@ -217,7 +235,7 @@ export async function render(container, ctx) {
     if (!isValidISODate(date) || date === state.date) return;
     state.date = date;
     state.editing = null;
-    state.form = { ...state.form, hours: null, comment: "" };
+    state.form = { ...state.form, hours: null, comment: "", to: "" };
     state.tripTouched = false;
     history.replaceState(null, "", `#/tid/${date}`);
     refresh({ focusLabel });
@@ -247,9 +265,10 @@ export async function render(container, ctx) {
     const week = isoWeek(state.date).week;
     setHTML(
       $("[data-mobile-week]"),
-      html`<div class="week-head">
+      html`${settings.companyName ? html`<p class="text-muted text-small">${settings.companyName}</p>` : ""}
+      <div class="week-head">
         <button type="button" class="icon-btn icon-btn--ghost" data-goto="${addDays(monday, -7)}" aria-label="Föregående vecka">${icon("chevronLeft")}</button>
-        <span class="week-head__label">Vecka ${week}${settings.companyName ? ` · ${settings.companyName}` : ""}</span>
+        <span class="week-head__label">Vecka ${week}</span>
         <button type="button" class="icon-btn icon-btn--ghost" data-goto="${addDays(monday, 7)}" aria-label="Nästa vecka">${icon("chevronRight")}</button>
         <label class="link-btn week-head__pick">
           Välj datum
@@ -300,7 +319,7 @@ export async function render(container, ctx) {
 
   function progressBar(sum, planned) {
     const percent = planned ? Math.min(100, Math.round((sum / planned) * 100)) : sum ? 100 : 0;
-    return html`<div class="progress" role="progressbar" aria-label="Registrerat av programmerad tid"
+    return html`<div class="progress" role="progressbar" aria-label="Registrerat av tid enligt schema"
       aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}" aria-valuetext="${formatHours(sum)} av ${formatHours(planned)} timmar">
       <div class="progress__bar" style="width: ${percent}%"></div>
     </div>`;
@@ -325,7 +344,7 @@ export async function render(container, ctx) {
         <div class="stack stack--s">
           ${progressBar(sum, planned)}
           <div class="split text-small text-muted">
-            <span>${planned ? `av ${formatHoursUnit(planned)} programmerad · ${formatHoursUnit(left)} kvar` : "Ledig dag enligt schemat"}</span>
+            <span>${planned ? `av ${formatHoursUnit(planned)} enligt schema · ${formatHoursUnit(left)} kvar` : "Ledig dag enligt schemat"}</span>
             <span>${planned ? `${percent} %` : ""}</span>
           </div>
         </div>
@@ -334,15 +353,13 @@ export async function render(container, ctx) {
   }
 
   function describeEntry(e) {
-    if (isAbsence(e.timeTypeId)) {
+    if (isPlaceless(e.timeTypeId)) {
       const name = typeById(e.timeTypeId)?.name ?? "Frånvaro";
       return { title: name, short: name };
     }
-    const p = projectById(e.projectId);
-    const c = customerById(p?.customerId);
     return {
-      title: `${c?.name ?? "Okänd kund"} · ${p ? `${p.projectNo} ${p.name}` : "Okänt projekt"}`,
-      short: `${c?.name ?? "Okänd kund"} · ${p?.projectNo ?? "?"}`,
+      title: placeLabel(e, projectById, customerById),
+      short: placeLabel(e, projectById, customerById, { short: true }),
     };
   }
 
@@ -393,10 +410,10 @@ export async function render(container, ctx) {
   function workSummary(f) {
     const hours = formatHoursUnit(f.hours ?? suggestedHours());
     const type = typeById(f.timeTypeId);
-    if (type?.category === "absence") return `${type.name} · ${hours}`;
+    if (isPlaceless(type?.id)) return `${type.name} · ${hours}`;
     const p = projectById(f.projectId);
     const c = customerById(f.customerId);
-    const where = p ? `${c?.name ?? ""} · ${p.projectNo}` : c ? `${c.name} · inget projekt valt` : "Ingen kund vald";
+    const where = p ? `${c?.name ?? ""} · ${p.projectNo}` : !c ? "Ingen kund vald" : withProjects ? `${c.name} · inget projekt valt` : c.name;
     return [where, type?.category === "overtime" ? type.name : "", hours].filter(Boolean).join(" · ");
   }
 
@@ -404,8 +421,31 @@ export async function render(container, ctx) {
     const article = articles.find((a) => a.id === m.articleId);
     const name = article?.name ?? m.name.trim();
     const unit = article?.unit ?? m.unit.trim();
-    const quantity = String(m.quantity).trim();
-    return [name, quantity ? `${quantity.replace(".", ",")} ${unit}`.trim() : ""].filter(Boolean).join(" · ") || "Påbörjat";
+    const quantity = Number(String(m.quantity).trim().replace(",", "."));
+    return [name, String(m.quantity).trim() && Number.isFinite(quantity) ? formatQuantity(quantity, unit) : ""].filter(Boolean).join(" · ") || "Påbörjat";
+  }
+
+  // Kort under projektvalet: vart man ska och vem man ringer. Beskrivning och dokument finns under Projekt.
+  function projectInfo(p) {
+    if (!p) return "";
+    const documents = p.documents?.length ?? 0;
+    const contact = p.contactName || p.contactPhone;
+    if (!p.address && !contact && !p.description && !documents) return "";
+    return html`<div class="place-info">
+      ${p.address
+        ? html`<a class="place-info__item" href="${mapUrl(p.address)}" target="_blank" rel="noopener">${icon("mapPin", 16)}${p.address}</a>`
+        : ""}
+      ${contact
+        ? html`<span class="place-info__item">${icon("phone", 16)}
+            ${p.contactName ?? ""}${p.contactName && p.contactPhone ? ", " : ""}${p.contactPhone
+              ? html`<a href="${telUrl(p.contactPhone)}">${p.contactPhone}</a>`
+              : ""}
+          </span>`
+        : ""}
+      <a class="place-info__item" href="#/projekt/projekt/${p.id}">${icon("file", 16)}${documents
+        ? `Beskrivning och ${plural(documents, "dokument", "dokument")}`
+        : "Mer om projektet"}</a>
+    </div>`;
   }
 
   // En del av formuläret som fälls ut och ihop (Arbetstid, Resa, Material)
@@ -430,7 +470,7 @@ export async function render(container, ctx) {
     const article = articles.find((a) => a.id === m.articleId);
     const other = m.articleId === OTHER;
     return html`
-      <p class="text-muted text-small">Uttaget kopplas till projektet och datumet ovan. Vill du bara registrera material? Sätt timmarna till 0.</p>
+      <p class="text-muted text-small">Det du tar kopplas till ${withProjects ? "projektet" : "kunden"} och datumet ovan. Vill du bara registrera material? Sätt timmarna till 0.</p>
       ${field({
         id: "mat-article",
         label: "Vad",
@@ -477,6 +517,16 @@ export async function render(container, ctx) {
     const editing = state.editing;
     const currentType = typeById(f.timeTypeId);
     const absence = currentType?.category === "absence";
+    const noPlace = isPlaceless(currentType?.id);
+    // Finns det bara en kund (och ett projekt) att välja är den förvald
+    if (!editing && !f.customerId) {
+      const selectable = withProjects ? customers.filter((c) => projects.some((p) => p.customerId === c.id)) : customers;
+      if (selectable.length === 1) f.customerId = selectable[0].id;
+    }
+    if (!editing && withProjects && f.customerId && !f.projectId) {
+      const only = projects.filter((p) => p.customerId === f.customerId);
+      if (only.length === 1) f.projectId = only[0].id;
+    }
     const customerProjects = projects.filter((p) => p.customerId === f.customerId);
     // En äldre rad kan ligga på ett projekt som har avslutats – visa det ändå när raden redigeras
     const editingProject = editing?.projectId && projectById(editing.projectId);
@@ -487,30 +537,46 @@ export async function render(container, ctx) {
     const showBasis = vehicle?.isCompanyCar;
     const showKm = vehicle && !(vehicle.isCompanyCar && f.vehicleBasis === "day");
     const hours = f.hours ?? suggestedHours();
-    const noProjects = !projects.length;
+    // Utan projekt går alla kunder att välja – plus en arkiverad kund på en rad som redigeras
+    const editingCustomer = !customers.some((c) => c.id === f.customerId) && customerById(f.customerId);
+    const customerOptions = withProjects
+      ? customers.filter((c) => projects.some((p) => p.customerId === c.id) || c.id === f.customerId)
+      : [...customers, ...(editingCustomer ? [editingCustomer] : [])];
+    const nothingToPick = withProjects ? !projects.length : !customers.length;
+    // Frånvaro över flera dagar – timmarna tas från schemat
+    const range = absence && !editing && Boolean(f.to) && f.to > state.date;
     const tripLabel = travel.enabled ? "Resa" : "Milersättning";
     const addTripLabel = travel.enabled ? "Lägg till restid eller milersättning" : "Lägg till milersättning";
     // Material hör inte till tidraden – därför inte när en rad redigeras
-    const showMaterial = materials.enabled && !absence && !editing;
+    const showMaterial = materials.enabled && !noPlace && !editing;
 
     setHTML(
       $("[data-form-card]"),
       html`<form class="form" data-time-form novalidate>
         ${state.locked
           ? callout(
-              html`<strong>${capitalizeMonth(state.date)} är markerad som klar och låst.</strong> Be din administratör låsa upp månaden om något behöver ändras.`,
+              isAdmin(me)
+                ? html`<strong>${capitalizeMonth(state.date)} är markerad som klar och låst.</strong>
+                    Du kan låsa upp den under <a href="#/granska/${monthOf(state.date)}">Granskning</a>.`
+                : html`<strong>${capitalizeMonth(state.date)} är markerad som klar och låst.</strong> Be din administratör låsa upp månaden om något behöver ändras.`,
               { variant: "pink", iconName: "lock" },
             )
           : ""}
         ${editing
-          ? html`<div class="callout"><span>${icon("edit", 18)}</span><div>Du redigerar en registrering från ${formatLongLower(editing.date)}.
+          ? html`<div class="callout${editing.status === "rejected" ? " callout--error" : ""}"><span>${icon(editing.status === "rejected" ? "alert" : "edit", 18)}</span><div>
+              Du redigerar en registrering från ${formatLongLower(editing.date)}.
+              ${editing.status === "rejected" && editing.rejectReason ? html`<br /><strong>Nekad:</strong> ${editing.rejectReason}` : ""}
               <button type="button" class="link-btn" data-cancel-edit>Avbryt redigering</button></div></div>`
           : ""}
-        ${noProjects && !state.locked
+        ${nothingToPick && !state.locked
           ? callout(
-              isAdmin(me)
-                ? html`Det finns inga pågående projekt än. <a href="#/projekt/projekt/ny">Lägg till ett projekt</a> – eller registrera frånvaro.`
-                : "Din administratör har inte lagt till några projekt än. Du kan registrera frånvaro så länge.",
+              withProjects
+                ? isAdmin(me)
+                  ? html`Det finns inga pågående projekt än. <a href="#/projekt/projekt/ny">Lägg till ett projekt</a> – eller registrera frånvaro.`
+                  : "Din administratör har inte lagt till några projekt än. Du kan registrera frånvaro så länge."
+                : isAdmin(me)
+                  ? html`Det finns inga kunder än. <a href="#/projekt/kunder/ny">Lägg till en kund</a> – eller registrera frånvaro.`
+                  : "Din administratör har inte lagt till några kunder än. Du kan registrera frånvaro så länge.",
               { iconName: "info" },
             )
           : ""}
@@ -522,40 +588,9 @@ export async function render(container, ctx) {
             key: "work",
             open: state.workOpen,
             iconName: "clock",
-            title: "Registrera arbetstid",
+            title: absence ? "Registrera frånvaro" : "Registrera arbetstid",
             meta: state.workOpen ? "" : workSummary(f),
             body: html`
-              <div class="grid-2">
-                ${field({
-                  id: "time-customer",
-                  label: html`<span class="only-desktop">1. </span>Kund`,
-                  control: select({
-                    id: "time-customer",
-                    name: "customerId",
-                    value: f.customerId,
-                    placeholder: "Välj kund…",
-                    disabled: absence,
-                    options: customers
-                      .filter((c) => projects.some((p) => p.customerId === c.id) || c.id === f.customerId)
-                      .map((c) => ({ value: c.id, label: c.name })),
-                  }),
-                })}
-                ${field({
-                  id: "time-project",
-                  label: html`<span class="only-desktop">2. </span>Projekt`,
-                  help: absence ? "Frånvaro kräver ingen kund eller projekt." : "Endast projekt för vald kund visas.",
-                  control: select({
-                    id: "time-project",
-                    name: "projectId",
-                    value: f.projectId,
-                    placeholder: f.customerId ? "Välj projekt…" : "Välj kund först…",
-                    disabled: absence || !f.customerId,
-                    help: true,
-                    options: customerProjects.map((p) => ({ value: p.id, label: `${p.projectNo} · ${p.name}` })),
-                  }),
-                })}
-              </div>
-
               <div class="grid-2">
                 ${field({
                   id: "time-type",
@@ -579,7 +614,54 @@ export async function render(container, ctx) {
                 </div>
               </div>
 
-              <div class="field">
+              ${absence && !editing
+                ? html`<div class="field">
+                    <label class="field__label" for="time-to">Till och med</label>
+                    <div class="field__control date-field">
+                      <span class="field__icon">${icon("calendar", 18)}</span>
+                      <span class="input input--with-icon date-field__text" aria-hidden="true">${formatLong(f.to || state.date)}</span>
+                      <input class="date-field__input" id="time-to" name="to" type="date" value="${f.to || state.date}" min="${state.date}"
+                        aria-describedby="time-to-help" data-open-picker />
+                    </div>
+                    <div class="field__help" id="time-to-help">
+                      ${range
+                        ? `${formatShort(state.date)}–${formatShort(f.to)}. Varje arbetsdag får timmarna enligt ditt schema. Dagar som redan har tid hoppas över.`
+                        : "Ledig flera dagar? Välj sista dagen – då sparas en rad per arbetsdag."}
+                    </div>
+                  </div>`
+                : ""}
+              ${noPlace ? "" : html`
+              <div class="grid-2">
+                ${field({
+                  id: "time-customer",
+                  label: "Kund",
+                  control: select({
+                    id: "time-customer",
+                    name: "customerId",
+                    value: f.customerId,
+                    placeholder: "Välj kund…",
+                    options: customerOptions.map((c) => ({ value: c.id, label: c.name })),
+                  }),
+                })}
+                ${withProjects ? field({
+                  id: "time-project",
+                  label: "Projekt",
+                  help: "Endast projekt för vald kund visas.",
+                  control: select({
+                    id: "time-project",
+                    name: "projectId",
+                    value: f.projectId,
+                    placeholder: f.customerId ? "Välj projekt…" : "Välj kund först…",
+                    disabled: !f.customerId,
+                    help: true,
+                    options: customerProjects.map((p) => ({ value: p.id, label: `${p.projectNo} · ${p.name}` })),
+                  }),
+                }) : ""}
+              </div>
+              ${withProjects ? html`<div data-project-info>${projectInfo(projectById(f.projectId))}</div>` : ""}
+              `}
+
+              <div class="field" ${range ? raw("hidden") : ""}>
                 <label class="field__label" for="time-hours">Timmar</label>
                 <div class="grid-2">
                   ${stepper({ id: "time-hours", name: "hours", value: hours, label: "timmar" })}
@@ -602,13 +684,13 @@ export async function render(container, ctx) {
                   name: "comment",
                   value: f.comment,
                   rows: 3,
-                  placeholder: "T.ex. vad som gjordes",
+                  placeholder: absence ? "T.ex. något administratören behöver veta" : "T.ex. vad som gjordes",
                 }),
               })}
             `,
           })}
 
-          ${absence
+          ${noPlace
             ? ""
             : section({
                 key: "trip",
@@ -666,7 +748,8 @@ export async function render(container, ctx) {
                           id: "time-km",
                           label: "Körda kilometer",
                           optional: true,
-                          control: input({ id: "time-km", name: "km", value: f.km, inputmode: "numeric", autocomplete: "off" }),
+                          help: kmHelp(f),
+                          control: input({ id: "time-km", name: "km", value: f.km, inputmode: "numeric", autocomplete: "off", help: true }),
                         })
                       : ""}
                   </div>
@@ -680,7 +763,7 @@ export async function render(container, ctx) {
                 iconName: state.materialOpen || hasMaterial() ? "box" : "plus",
                 pink: state.materialOpen || hasMaterial(),
                 title: state.materialOpen || hasMaterial() ? `${materialLabel} från lager` : `Lägg till ${materialLabel.toLowerCase()} från lager`,
-                meta: hasMaterial() ? materialSummary(state.material) : state.materialOpen ? "Uttag och meddelande" : "",
+                meta: hasMaterial() ? materialSummary(state.material) : state.materialOpen ? "Vad du tog och ett meddelande" : "",
                 body: materialFields(state.material),
               })
             : ""}
@@ -720,6 +803,7 @@ export async function render(container, ctx) {
               (t) => html`<button type="button" class="btn btn--secondary btn--sm" data-split="${t.id}">Spara som ${t.name.toLowerCase()}</button>`,
             )}
           </div>
+          <p class="text-small text-muted">${allowedOvertime.map((t) => COMPENSATION_HELP[t.compensation]).filter(Boolean).join(" ")}</p>
         </div>
       </div>`,
     );
@@ -740,6 +824,7 @@ export async function render(container, ctx) {
       customerId: el.customerId?.value ?? state.form.customerId,
       projectId: el.projectId?.value ?? state.form.projectId,
       timeTypeId: el.timeTypeId?.value ?? state.form.timeTypeId,
+      to: el.to?.value ?? state.form.to,
       hours: parseHours(el.hours.value),
       travelHours: el.travelHours ? parseHours(el.travelHours.value) : state.form.travelHours,
       travelBillable: el.travelBillable ? el.travelBillable.checked : state.form.travelBillable,
@@ -761,11 +846,26 @@ export async function render(container, ctx) {
   }
 
   // Uppdaterar texten i rubriken på Resa och Material medan man skriver
+  // Ersättningen räknas per mil, men man läser av kilometer: "34 km = 3,4 mil · 85 kr"
+  function kmHelp(f) {
+    const vehicle = vehicleById(f.vehicleTypeId);
+    const km = Number(String(f.km ?? "").trim());
+    const rate = vehicle?.ratePerMil;
+    if (!String(f.km ?? "").trim() || !Number.isFinite(km) || km <= 0) {
+      return rate ? `10 km = 1 mil. Ersättningen är ${formatAmountShort(rate)} kr per mil.` : "10 km = 1 mil.";
+    }
+    const mil = km / 10;
+    const text = `${formatInteger(km)} km = ${String(Math.round(mil * 10) / 10).replace(".", ",")} mil`;
+    return rate ? `${text} · ${formatAmountShort(Math.round(mil * rate * 100) / 100)} kr` : `${text}.`;
+  }
+
   function updateSummaries() {
     const trip = $('[data-summary="trip"]');
     if (trip) trip.textContent = tripSummary(state.form);
+    const km = $("#time-km-help");
+    if (km) km.textContent = kmHelp(state.form);
     const material = $('[data-summary="material"]');
-    if (material) material.textContent = hasMaterial() ? materialSummary(state.material) : "Uttag och meddelande";
+    if (material) material.textContent = hasMaterial() ? materialSummary(state.material) : "Vad du tog och ett meddelande";
   }
 
   // Ritar om formuläret men behåller fokus på samma fält
@@ -858,17 +958,24 @@ export async function render(container, ctx) {
       );
       return;
     }
-    const first = rows[0];
-    const here = rows.some((e) => e.date === state.date);
+    // Rader på den valda dagen visas i listan – länka till nästa dag med nekade rader
+    const here = rows.filter((e) => e.date === state.date);
+    const elsewhere = rows.filter((e) => e.date !== state.date);
+    const next = elsewhere.find((e) => e.date > state.date) ?? elsewhere[0];
     setHTML(
       $("[data-rejected]"),
       html`<div class="callout callout--error" role="status">
         ${icon("alert", 18)}
         <div>
-          <strong>${plural(rows.length, "nekad registrering", "nekade registreringar")} att rätta.</strong>
-          ${here
-            ? " Se listan nedan – redigera raden och spara igen."
-            : html` <a href="#/tid/${first.date}">Visa ${formatLongLower(first.date)}</a>`}
+          ${here.length
+            ? html`<strong>${plural(here.length, "nekad registrering", "nekade registreringar")} att rätta i listan nedan.</strong>
+                Redigera raden och spara igen.
+                ${next
+                  ? html` ${plural(elsewhere.length, "till", "till")} på andra dagar:
+                      <a href="#/tid/${next.date}">visa ${formatLongLower(next.date)}</a>`
+                  : ""}`
+            : html`<strong>${plural(rows.length, "nekad registrering", "nekade registreringar")} att rätta.</strong>
+                <a href="#/tid/${next.date}">Visa ${formatLongLower(next.date)}</a>`}
         </div>
       </div>`,
     );
@@ -884,13 +991,13 @@ export async function render(container, ctx) {
       html`
         <div class="split">
           <h2 class="list-heading" id="time-material-title">${materialLabel} ${isToday ? "idag" : formatLongLower(state.date)}</h2>
-          <span class="text-muted text-small">${plural(state.dayMaterials.length, "uttag", "uttag")}</span>
+          <span class="text-muted text-small">${plural(state.dayMaterials.length, "rad", "rader")}</span>
         </div>
         <ul class="list">
           ${state.dayMaterials.map((m) => html`<li class="row row--wrap">
             <span class="row__icon row__icon--pink">${icon("box", 20)}</span>
             <span class="row__body">
-              <span class="row__title">${m.name} · ${quantityText(m.quantity)} ${m.unit}</span>
+              <span class="row__title">${m.name} · ${formatQuantity(m.quantity, m.unit)}</span>
               <span class="row__meta">${[describeEntry({ projectId: m.projectId }).title, m.message].filter(Boolean).join(" · ")}</span>
             </span>
             <span class="row__aside">${statusPill(m.handled ? "handled" : "new")}</span>
@@ -898,7 +1005,7 @@ export async function render(container, ctx) {
               ? ""
               : html`<span class="row__tools">
                   <button type="button" class="icon-btn icon-btn--ghost icon-btn--danger" data-delete-material="${m.id}" title="Ta bort"
-                    aria-label="Ta bort ${m.name}, ${quantityText(m.quantity)} ${m.unit}">${icon("trash", 18)}</button>
+                    aria-label="Ta bort ${m.name}, ${formatQuantity(m.quantity, m.unit)}">${icon("trash", 18)}</button>
                 </span>`}
           </li>`)}
         </ul>
@@ -940,8 +1047,8 @@ export async function render(container, ctx) {
   function formFromEntry(entry, { keepProject = true } = {}) {
     return {
       ...emptyForm(),
-      customerId: keepProject && entry.projectId ? projectById(entry.projectId)?.customerId ?? "" : "",
-      projectId: keepProject ? entry.projectId ?? "" : "",
+      customerId: keepProject ? (entry.projectId ? projectById(entry.projectId)?.customerId : entry.customerId) ?? "" : "",
+      projectId: keepProject && withProjects ? entry.projectId ?? "" : "",
       timeTypeId: entry.timeTypeId ?? defaultType,
       hours: entry.hours,
       travelHours: entry.travelHours || 0,
@@ -956,7 +1063,7 @@ export async function render(container, ctx) {
 
   /* ---------- Spara ---------- */
 
-  const WORK_FIELDS = ["customerId", "projectId", "timeTypeId", "hours", "comment"];
+  const WORK_FIELDS = ["customerId", "projectId", "timeTypeId", "to", "hours", "comment"];
   const TRIP_FIELDS = ["travelHours", "travelBillable", "vehicleTypeId", "vehicleBasis", "km"];
 
   // Fäller ut delarna som har fel, så att felen syns. Returnerar formuläret (det kan ha ritats om).
@@ -990,6 +1097,7 @@ export async function render(container, ctx) {
       unit: other ? m.unit : "",
       quantity: m.quantity,
       projectId: state.form.projectId,
+      customerId: state.form.customerId,
       message: m.message,
     };
   }
@@ -1001,17 +1109,24 @@ export async function render(container, ctx) {
     clearFormErrors(form);
     const f = state.form;
     const absence = isAbsence(f.timeTypeId);
-    const withMaterial = materials.enabled && !absence && !state.editing && hasMaterial();
+    const noPlace = isPlaceless(f.timeTypeId);
+    const withMaterial = materials.enabled && !noPlace && !state.editing && hasMaterial();
     // 0 timmar och ingen resa = bara material
     const withEntry = Boolean(state.editing) || !withMaterial || f.hours !== 0 || hasTrip(f);
+
+    // Frånvaro över flera dagar sparas för sig
+    if (absence && !state.editing && f.to && f.to > state.date) {
+      await saveAbsenceRange(form, f);
+      return;
+    }
 
     const fields = {};
     if (f.hours === null) fields.hours = "Ange timmar, t.ex. 4,5.";
     else if (f.hours < 0 || f.hours > 24) fields.hours = "Ange 0–24 timmar.";
     if (f.travelHours === null) fields.travelHours = "Ange restid, t.ex. 1,5.";
-    if (!absence) {
+    if (!noPlace) {
       if (!f.customerId) fields.customerId = "Välj en kund, eller en typ av frånvaro.";
-      else if (!f.projectId) fields.projectId = "Välj ett projekt.";
+      else if (withProjects && !f.projectId) fields.projectId = "Välj ett projekt.";
     }
     if (withMaterial) {
       const m = state.material;
@@ -1032,10 +1147,11 @@ export async function render(container, ctx) {
 
     const base = {
       date: state.date,
-      projectId: absence ? null : f.projectId,
+      projectId: noPlace ? null : f.projectId,
+      customerId: noPlace ? null : f.customerId,
       comment: f.comment,
     };
-    const trip = absence
+    const trip = noPlace
       ? { travelHours: 0, vehicleTypeId: null }
       : {
           travelHours: f.travelHours || 0,
@@ -1048,6 +1164,7 @@ export async function render(container, ctx) {
     const button = form.querySelector('button[type="submit"]');
     setBusy(button, true);
     const wasEditing = Boolean(state.editing);
+    const materialText = withMaterial ? materialSummary(state.material) : "";
     let entrySaved = false;
     try {
       if (withEntry && split) {
@@ -1074,7 +1191,7 @@ export async function render(container, ctx) {
       }
       const shown = fromMaterial
         ? {
-            message: entrySaved ? `Tiden är sparad, men uttaget kunde inte sparas. ${error.message}` : error.message,
+            message: entrySaved ? `Tiden är sparad, men det du tog från lagret kunde inte sparas. ${error.message}` : error.message,
             fields: materialErrors(error.fields),
           }
         : error;
@@ -1095,14 +1212,35 @@ export async function render(container, ctx) {
     const message = wasEditing
       ? "Ändringen är sparad"
       : !withEntry
-        ? "Uttaget är registrerat"
+        ? `Sparat från lagret: ${materialText}`
         : withMaterial
-          ? "Tiden och uttaget är sparade"
+          ? `Tiden är sparad, och från lagret: ${materialText}`
           : split
             ? "Arbete och övertid är sparade"
             : "Registreringen är sparad";
     notify(message);
-    $("#time-customer")?.focus();
+    $("#time-type")?.focus();
+  }
+
+  // Frånvaro från valt datum till och med f.to – en rad per arbetsdag enligt schemat
+  async function saveAbsenceRange(form, f) {
+    const button = form.querySelector('button[type="submit"]');
+    setBusy(button, true);
+    try {
+      const { saved, skipped } = await store.saveAbsenceRange({ from: state.date, to: f.to, timeTypeId: f.timeTypeId, comment: f.comment });
+      state.form = emptyForm();
+      state.workOpen = true;
+      await refresh();
+      const name = typeById(f.timeTypeId)?.name ?? "Frånvaro";
+      notify(
+        `${name} är sparad för ${plural(saved.length, "dag", "dagar")}` +
+          (skipped.length ? ` – ${skipped.map(formatShort).join(", ")} hade redan tid och hoppades över` : ""),
+      );
+      $("#time-type")?.focus();
+    } catch (error) {
+      setBusy(button, false);
+      showFormErrors(openSectionsWithErrors(error.fields), error);
+    }
   }
 
   /* ---------- Händelser ---------- */
@@ -1119,7 +1257,7 @@ export async function render(container, ctx) {
     }
 
     // Öppna kalendern när man klickar på datumet
-    const picker = target.closest("[data-date-picker]");
+    const picker = target.closest("[data-date-picker], [data-open-picker]");
     if (picker) {
       try {
         picker.showPicker?.();
@@ -1159,15 +1297,15 @@ export async function render(container, ctx) {
     if (delMaterial) {
       const item = state.dayMaterials.find((m) => m.id === delMaterial.dataset.deleteMaterial);
       const ok = await confirmDialog({
-        title: "Ta bort uttaget?",
-        message: `${item.name} · ${quantityText(item.quantity)} ${item.unit}.`,
+        title: `Ta bort ${item.name}?`,
+        message: `${formatQuantity(item.quantity, item.unit)} från lagret.`,
         confirmLabel: "Ta bort",
         danger: true,
       });
       if (!ok) return;
       try {
         await store.deleteMaterial(item.id);
-        notify("Uttaget är borttaget");
+        notify(`${item.name} är borttagen`);
         await refresh();
         updateBadges();
       } catch (error) {
@@ -1192,14 +1330,17 @@ export async function render(container, ctx) {
       state.tripOpen = latestHadTrip();
       renderForm();
       renderList();
-      $("#time-customer")?.focus();
+      $("#time-type")?.focus();
       return;
     }
 
     if (target.closest("[data-same-as-last]")) {
       const last = state.lastEntry;
       if (!last) return;
-      const selectable = !last.projectId || projects.some((x) => x.id === last.projectId);
+      // Projektet (eller kunden, utan projekt) måste fortfarande gå att välja
+      const lastCustomer = last.projectId ? projectById(last.projectId)?.customerId : last.customerId;
+      const selectable = isPlaceless(last.timeTypeId) ||
+        (withProjects ? projects.some((x) => x.id === last.projectId) : customers.some((c) => c.id === lastCustomer));
       const type = typeById(last.timeTypeId);
       const typeOk = type && !type.hidden && (type.category !== "overtime" || allowedOvertime.includes(type));
       state.editing = null;
@@ -1211,7 +1352,9 @@ export async function render(container, ctx) {
       notify(
         selectable
           ? `Ifyllt från ${formatShort(last.date)} – tryck Spara för att spara.`
-          : "Projektet från förra gången är avslutat – välj ett annat.",
+          : withProjects
+            ? "Projektet från förra gången är avslutat – välj ett annat."
+            : "Kunden från förra gången är arkiverad – välj en annan.",
       );
       $("#time-hours")?.focus();
       return;
@@ -1227,8 +1370,13 @@ export async function render(container, ctx) {
       state.workOpen = true;
       renderForm();
       renderList();
-      $("[data-form-card]").scrollIntoView({ block: "start", behavior: "smooth" });
-      $("#time-hours").focus({ preventScroll: true });
+      // Hoppa direkt till formuläret (överst finns orsaken om raden är nekad). En mjuk skrollning
+      // avbryts lätt i mobilen när listan ritas om, därför utan animation och efter omritningen.
+      requestAnimationFrame(() => {
+        const card = $("[data-form-card]");
+        window.scrollTo({ top: card.getBoundingClientRect().top + window.scrollY - 12, behavior: "auto" });
+        $("#time-hours").focus({ preventScroll: true });
+      });
       return;
     }
 
@@ -1269,8 +1417,12 @@ export async function render(container, ctx) {
     readForm();
     if (target.name === "customerId") state.form.projectId = "";
     if (target.name === "timeTypeId") state.form.hours = null; // ny förifylld tid för typen
-    if (["customerId", "timeTypeId", "vehicleTypeId", "vehicleBasis", MATERIAL_FIELDS.articleId].includes(target.name)) rerenderForm();
+    if (["customerId", "timeTypeId", "to", "vehicleTypeId", "vehicleBasis", MATERIAL_FIELDS.articleId].includes(target.name)) rerenderForm();
     else updateSummaries();
+    if (target.name === "projectId") {
+      const slot = container.querySelector("[data-project-info]");
+      if (slot) setHTML(slot, projectInfo(projectById(target.value)));
+    }
   });
 
   container.addEventListener("input", (event) => {

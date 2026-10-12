@@ -1,13 +1,15 @@
 // Påminnelser till admin.
 import { today } from "./dates.js";
 
-// Milersättningen ändras vid årsskiftet. Påminn om beloppen aldrig kontrollerats,
-// eller senast kontrollerades ett tidigare år.
-export function ratesNeedCheck(settings) {
-  const checked = settings.ratesCheckedAt;
-  if (!checked) return { due: true, reason: "never" };
-  if (checked.slice(0, 4) < today().slice(0, 4)) return { due: true, reason: "new-year", year: today().slice(0, 4) };
-  return { due: false };
+// Milersättningen ändras vid årsskiftet. Varje fordon sparar vilket år beloppet gäller (rateYear).
+// Påminn när det äldsta beloppet bland fordonen som används gäller ett tidigare år än i år.
+// { due, validYear, year } – validYear = året beloppen gäller, year = i år.
+export function ratesNeedCheck(settings, now = today()) {
+  const year = Number(now.slice(0, 4));
+  const years = (settings.vehicleTypes ?? [])
+    .filter((v) => !v.hidden && !v.retired && v.ratePerMil !== null && v.ratePerMil !== undefined)
+    .map((v) => v.rateYear ?? 0);
+  if (!years.length) return { due: false, validYear: null, year };
+  const validYear = Math.min(...years);
+  return { due: validYear < year, validYear: validYear || null, year };
 }
-
-export const SKATTEVERKET_URL = "https://www.skatteverket.se/";

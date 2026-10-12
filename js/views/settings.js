@@ -1,4 +1,4 @@
-// Inställningar (bara admin): företag, arbetstid, övertid, restid, typer av tid, fordon och milersättning,
+// Inställningar (bara admin): företag, arbetstid, projekt, övertid, restid, typer av tid, fordon och milersättning,
 // material, säkerhetskopia och gallring.
 // #/installningar/<del> (t.ex. foretag, fordon) scrollar direkt till den delen.
 import * as store from "../store.js";
@@ -10,8 +10,8 @@ import {
   field, input, pill, openDialog, confirmDialog, notify, callout, showFormErrors, clearFormErrors, setBusy,
 } from "../lib/ui.js";
 import { downloadFile } from "../lib/csv.js";
-import { ratesNeedCheck, SKATTEVERKET_URL } from "../lib/reminders.js";
-import { OVERTIME_MODES, TIME_CATEGORIES, MATERIAL_LABELS, HOUR_STEPS } from "../store.js";
+import { ratesNeedCheck } from "../lib/reminders.js";
+import { OVERTIME_MODES, TIME_CATEGORIES, MATERIAL_LABELS, HOUR_STEPS, VEHICLE_RATES } from "../store.js";
 import { ADMIN } from "../routes.js";
 import { allowed } from "./guard.js";
 
@@ -25,6 +25,7 @@ const MODE_HELP = {
 const SECTIONS = [
   ["foretag", "Företag"],
   ["arbetstid", "Arbetstid"],
+  ["projekt", "Projekt"],
   ["overtid", "Övertid och restid"],
   ["typer", "Typer av tid"],
   ["fordon", "Fordon och milersättning"],
@@ -32,6 +33,15 @@ const SECTIONS = [
   ["sakerhetskopia", "Säkerhetskopia"],
   ["gallring", "Gallring"],
 ];
+
+// Vad standardfordonen är (visas under namnet i listan)
+const VEHICLE_INFO = {
+  firmabil: "Företagets bil – företaget står för kostnaden.",
+  "privat-bil": "Den anställdes egen bil.",
+  forman: "Bensin, diesel eller laddhybrid.",
+  "forman-el": "Förmånsbil som drivs helt med el.",
+  motorcykel: "Skatteverket har inget eget belopp för motorcykel – fyll i det ni betalar.",
+};
 
 // 1.5 → "1,5", 25 → "25", 12.5 → "12,5"
 const shortNumber = (value) => (value === null || value === undefined ? "" : formatAmount(value).replace(/,00$/, "").replace(/(,\d)0$/, "$1"));
@@ -55,6 +65,7 @@ export async function render(container, ctx) {
       </nav>
       <section class="card card--lg" id="set-sec-foretag" aria-labelledby="set-company" data-company></section>
       <section class="card card--lg" id="set-sec-arbetstid" aria-labelledby="set-week" data-week></section>
+      <section class="card card--lg" id="set-sec-projekt" aria-labelledby="set-projects" data-projects></section>
       <div class="grid-2 settings-grid" id="set-sec-overtid">
         <section class="card card--lg" aria-labelledby="set-overtime" data-overtime></section>
         <section class="card card--lg" aria-labelledby="set-travel" data-travel></section>
@@ -114,7 +125,7 @@ export async function render(container, ctx) {
         <div class="stack stack--s">
           <h2 class="card__title" id="set-week">Arbetstid</h2>
           <p class="text-muted text-small">
-            Timmar per veckodag. Styr den förifyllda tiden och "Programmerad" i tidrapporten.
+            Timmar per veckodag. Styr den förifyllda tiden och "enligt schema" i tidrapporten.
             Anställda med eget schema (under Anställda) påverkas inte.
           </p>
         </div>
@@ -179,6 +190,26 @@ export async function render(container, ctx) {
     );
   }
 
+  /* ---------- Projekt ---------- */
+
+  function renderProjects() {
+    const enabled = settings.projects?.enabled !== false;
+    setHTML(
+      $("[data-projects]"),
+      html`<form class="form" data-projects-form novalidate>
+        <div class="stack stack--s">
+          <h2 class="card__title" id="set-projects">Projekt</h2>
+          <p class="text-muted text-small">
+            Med projekt väljer medarbetarna först kund och sedan projekt – bra för jobb som pågår en tid.
+            Utan projekt väljer de bara kund – bra för många korta jobb.
+          </p>
+        </div>
+        ${choice("checkbox", "enabled", "set-projects-enabled", "Använd projekt", "Av: tid och material rapporteras direkt på kunden. Det som redan är registrerat ändras inte.", enabled)}
+        <div class="form__actions"><button type="submit" class="btn btn--primary">Spara projekt</button></div>
+      </form>`,
+    );
+  }
+
   /* ---------- Restid ---------- */
 
   function renderTravel() {
@@ -206,13 +237,13 @@ export async function render(container, ctx) {
   function renderTypes() {
     const types = settings.timeTypes;
     const row = (t) => {
-      const canHide = t.category === "absence";
+      const canHide = t.category === "absence" || Boolean(t.placeless);
       const overtimeOff = t.category === "overtime" && !(settings.overtime.mode === "both" || settings.overtime.mode === t.compensation);
       return html`<li class="row row--wrap${t.hidden ? " row--muted" : ""}">
         <span class="row__icon${t.category === "absence" ? " row__icon--pink" : ""}">${icon(t.category === "absence" ? "sun" : t.category === "overtime" ? "overtime" : "clock", 18)}</span>
         <span class="row__body">
           <span class="row__title">${t.name}</span>
-          <span class="row__meta">${TIME_CATEGORIES[t.category]}${t.category === "overtime" ? ` · ersätts med ${t.compensation === "leave" ? "komptid" : "lön"}` : ""}</span>
+          <span class="row__meta">${t.placeless ? "Arbetstid utan kund och projekt" : TIME_CATEGORIES[t.category]}${t.category === "overtime" ? ` · ersätts med ${t.compensation === "leave" ? "komptid" : "lön"}` : ""}</span>
         </span>
         <span class="row__aside">
           ${t.hidden ? pill("Dold", "draft", "minus") : ""}
@@ -234,7 +265,7 @@ export async function render(container, ctx) {
             <h2 class="card__title" id="set-types">Typer av tid</h2>
             <p class="text-muted text-small">Det medarbetarna väljer under "Typ av tid". Dolda typer finns kvar i historiken.</p>
           </div>
-          <button type="button" class="btn btn--secondary" data-new-type>${icon("plus")}Ny frånvarotyp</button>
+          <button type="button" class="btn btn--secondary" data-new-type>${icon("plus")}Ny typ av tid</button>
         </div>
         <h3 class="section-label">Arbete och övertid</h3>
         <ul class="list">${types.filter((t) => t.category !== "absence").map(row)}</ul>
@@ -248,53 +279,75 @@ export async function render(container, ctx) {
 
   function renderVehicles() {
     const reminder = ratesNeedCheck(settings);
+    const visible = settings.vehicleTypes.filter((v) => !v.hidden && !v.retired);
+    const skatteverket = html`<a href="${VEHICLE_RATES.url}" target="_blank" rel="noopener">Skatteverket: Belopp och procent ${VEHICLE_RATES.year}<span class="visually-hidden"> (öppnas i ny flik)</span></a>`;
+    // Varifrån beloppet kommer
+    const source = (v) => {
+      const standard = VEHICLE_RATES.perMil[v.id];
+      if (v.rateCustom) {
+        return standard !== undefined ? `Eget belopp. Skatteverkets belopp för ${VEHICLE_RATES.year}: ${shortNumber(standard)} kr.` : "Eget belopp.";
+      }
+      if (v.ratePerMil === null || v.ratePerMil === undefined) return "Inget belopp – fyll i det ni betalar.";
+      return `Skatteverkets belopp för ${v.rateYear ?? VEHICLE_RATES.year} – ändra om ni har ett annat avtal.`;
+    };
     setHTML(
       $("[data-vehicles]"),
       html`
-        <div class="split split--center split--stack">
-          <div class="stack stack--s">
-            <h2 class="card__title" id="set-vehicles">Fordon och milersättning</h2>
-            <p class="text-muted text-small">
-              Ersättning per mil följer med i exporten som underlag. Kontrollera Skatteverkets aktuella belopp (sök på "milersättning" på deras webbplats) – de ändras vid årsskiftet.
-            </p>
-          </div>
-          <button type="button" class="btn btn--secondary" data-new-vehicle>${icon("plus")}Nytt fordon</button>
+        <div class="stack stack--s">
+          <h2 class="card__title" id="set-vehicles">Fordon och milersättning</h2>
+          <p class="text-muted text-small">
+            Medarbetarna väljer fordon under Resa i tidrapporten. Beloppen per mil är förifyllda med Skatteverkets skattefria belopp
+            och följer med i exporten. Ändra om ni betalar något annat – egna belopp ändras aldrig automatiskt.
+          </p>
+          <p class="text-small">${skatteverket}</p>
         </div>
-        <div class="callout${reminder.due ? " callout--pink" : ""}">
-          ${icon(reminder.due ? "alert" : "check", 18)}
-          <div class="stack stack--s">
-            <p>
-              ${reminder.due
-                ? reminder.reason === "never"
-                  ? html`<strong>Beloppen har inte kontrollerats.</strong> Fyll i Skatteverkets aktuella belopp per mil.`
-                  : html`<strong>Nytt år – kontrollera beloppen för ${reminder.year}.</strong> Skatteverket ändrar milersättningen vid årsskiftet.`
-                : html`Senast kontrollerade: <strong>${formatDate(settings.ratesCheckedAt)}</strong>.`}
-            </p>
-            <div class="cluster">
-              <a class="btn btn--text btn--sm" href="${SKATTEVERKET_URL}" target="_blank" rel="noopener">
-                Öppna Skatteverket ${icon("arrowRight", 16)}<span class="visually-hidden">, öppnas i ny flik – sök på milersättning</span>
-              </a>
-              <button type="button" class="btn btn--secondary btn--sm" data-rates-checked>${icon("check", 16)}Jag har kontrollerat beloppen</button>
-            </div>
+        ${reminder.due
+          ? html`<div class="callout callout--pink">
+              ${icon("alert", 18)}
+              <div class="stack stack--s">
+                <p><strong>Beloppen gäller ${reminder.validYear ?? "ett tidigare år"} – kontrollera för ${reminder.year}.</strong>
+                  Skatteverket ändrar milersättningen vid årsskiftet.</p>
+                <div class="cluster">
+                  <button type="button" class="btn btn--secondary btn--sm" data-rates-checked>${icon("check", 16)}Jag har kontrollerat beloppen</button>
+                </div>
+              </div>
+            </div>`
+          : reminder.validYear
+            ? html`<p class="text-muted text-small">Beloppen gäller ${reminder.validYear}.${settings.ratesCheckedAt ? ` Senast kontrollerade ${formatDate(settings.ratesCheckedAt)}.` : ""}</p>`
+            : ""}
+        <form class="form" data-rates-form novalidate>
+          <div class="form-error" data-form-error role="alert" tabindex="-1" hidden></div>
+          <ul class="list">
+            ${visible.map((v) => html`<li class="row row--wrap">
+              <span class="row__icon">${icon("car", 18)}</span>
+              <span class="row__body">
+                <span class="row__title">${v.name}</span>
+                ${VEHICLE_INFO[v.id] ? html`<span class="row__meta">${VEHICLE_INFO[v.id]}</span>` : ""}
+                ${v.isCompanyCar
+                  ? html`<span class="row__meta">Ingen ersättning – körda mil sparas bara som underlag.</span>`
+                  : html`<span class="row__meta" id="rate-${v.id}-help">${source(v)}</span>`}
+              </span>
+              <span class="row__actions">
+                ${v.isCompanyCar
+                  ? ""
+                  : html`<span class="rate-field">
+                      <label class="visually-hidden" for="rate-${v.id}">Belopp per mil för ${v.name}</label>
+                      <input class="input rate-field__input" id="rate-${v.id}" name="rate-${v.id}" value="${shortNumber(v.ratePerMil)}"
+                        inputmode="decimal" autocomplete="off" aria-describedby="rate-${v.id}-help" />
+                      <span class="rate-field__unit" aria-hidden="true">kr/mil</span>
+                    </span>`}
+                <span class="row__buttons">
+                  <button type="button" class="btn btn--text btn--sm" data-rename-vehicle="${v.id}" aria-label="Byt namn på ${v.name}">Byt namn</button>
+                  <button type="button" class="btn btn--text btn--text-danger btn--sm" data-toggle-vehicle="${v.id}" aria-label="Ta bort ${v.name} från listan">Ta bort</button>
+                </span>
+              </span>
+            </li>`)}
+          </ul>
+          <div class="form__actions">
+            <button type="submit" class="btn btn--primary">Spara belopp</button>
+            <button type="button" class="btn btn--secondary" data-add-vehicle>${icon("plus")}Lägg till fordon</button>
           </div>
-        </div>
-        <ul class="list">
-          ${settings.vehicleTypes.map((v) => html`<li class="row row--wrap${v.hidden ? " row--muted" : ""}">
-            <span class="row__icon">${icon("car", 18)}</span>
-            <span class="row__body">
-              <span class="row__title">${v.name}</span>
-              <span class="row__meta">${[
-                v.ratePerMil !== null && v.ratePerMil !== undefined ? `${shortNumber(v.ratePerMil)} kr/mil` : "Belopp saknas",
-                v.isCompanyCar ? "Bil per dag eller per mil" : "",
-              ].filter(Boolean).join(" · ")}</span>
-            </span>
-            <span class="row__aside">${v.hidden ? pill("Dold", "draft", "minus") : ""}</span>
-            <span class="row__actions">
-              <button type="button" class="btn btn--secondary btn--sm" data-edit-vehicle="${v.id}" aria-label="Redigera ${v.name}">${icon("edit", 16)}Redigera</button>
-              <button type="button" class="btn btn--text btn--sm" data-toggle-vehicle="${v.id}" aria-label="${v.hidden ? "Visa" : "Dölj"} ${v.name}">${v.hidden ? "Visa" : "Dölj"}</button>
-            </span>
-          </li>`)}
-        </ul>
+        </form>
       `,
     );
   }
@@ -310,7 +363,7 @@ export async function render(container, ctx) {
         <div class="stack stack--s">
           <h2 class="card__title" id="set-materials">Material från lager</h2>
           <p class="text-muted text-small">
-            Låt medarbetarna registrera det de tar från lagret, till exempel byggmaterial, hårfärg eller städmedel.
+            Låt medarbetarna registrera det de tar från lagret, till exempel skruv, reglar eller fogmassa.
             Du bestämmer vad det ska heta och vilka artiklar som finns.
           </p>
         </div>
@@ -365,13 +418,21 @@ export async function render(container, ctx) {
   async function renderRetention() {
     const months = settings.retentionMonths;
     const cutoff = cutoffFor(months);
-    const { entries, oldest } = await store.countEntriesBefore(cutoff);
+    const { entries, materials, oldest } = await store.countEntriesBefore(cutoff);
+    // "12 registreringar och 3 rader material från lagret"
+    const what = [
+      entries ? plural(entries, "registrering", "registreringar") : "",
+      materials ? `${plural(materials, "rad", "rader")} material från lagret` : "",
+    ].filter(Boolean).join(" och ");
     setHTML(
       $("[data-retention]"),
       html`<form class="form" data-retention-form novalidate>
         <div class="stack stack--s">
           <h2 class="card__title" id="set-retention">Gallring</h2>
-          <p class="text-muted text-small">Registreringar äldre än den valda tiden kan raderas. Inget raderas automatiskt.</p>
+          <p class="text-muted text-small">
+            Tidrader och material från lagret som är äldre än den valda tiden kan raderas, tillsammans med låsningen av de månaderna.
+            Anställda, kunder, projekt och artiklar ligger kvar. Inget raderas automatiskt.
+          </p>
         </div>
         <div class="form-error" data-form-error role="alert" tabindex="-1" hidden></div>
         ${field({
@@ -384,13 +445,13 @@ export async function render(container, ctx) {
         <div class="callout">
           ${icon("info", 18)}
           <div>
-            ${entries
-              ? html`<strong>${plural(entries, "registrering", "registreringar")}</strong> är äldre än ${formatDate(cutoff)} (äldsta: ${formatDate(oldest)}).`
-              : html`Inga registreringar är äldre än ${formatDate(cutoff)}.`}
+            ${what
+              ? html`<strong>${what}</strong> är äldre än ${formatDate(cutoff)} (äldsta: ${formatDate(oldest)}).`
+              : html`Inga registreringar eller material från lagret är äldre än ${formatDate(cutoff)}.`}
           </div>
         </div>
-        ${entries
-          ? html`<div><button type="button" class="btn btn--danger" data-purge="${cutoff}" data-count="${entries}">${icon("trash", 16)}Radera ${plural(entries, "registrering", "registreringar")}</button></div>`
+        ${what
+          ? html`<div><button type="button" class="btn btn--danger btn--wrap" data-purge="${cutoff}" data-what="${what}">${icon("trash", 16)}Radera ${plural(entries + materials, "rad", "rader")}</button></div>`
           : ""}
       </form>`,
     );
@@ -401,6 +462,7 @@ export async function render(container, ctx) {
   function renderAll() {
     renderCompany();
     renderWeek();
+    renderProjects();
     renderOvertime();
     renderTravel();
     renderTypes();
@@ -419,38 +481,88 @@ export async function render(container, ctx) {
 
   async function typeDialog(type = null) {
     await openDialog({
-      title: type ? `Byt namn på ${type.name}` : "Ny frånvarotyp",
-      body: field({ id: "type-name", label: "Namn", control: input({ id: "type-name", name: "name", value: type?.name, autocomplete: "off", required: true }) }),
+      title: type ? `Byt namn på ${type.name}` : "Ny typ av tid",
+      body: html`
+        ${field({ id: "type-name", label: "Namn", control: input({ id: "type-name", name: "name", value: type?.name, autocomplete: "off", required: true }) })}
+        ${type
+          ? ""
+          : html`<fieldset class="fieldset">
+              <legend class="field__label">Räknas som</legend>
+              <div class="radio-list">
+                ${choice("radio", "category", "type-cat-absence", "Frånvaro", "T.ex. tjänstledighet eller ledig utan lön.", true, false, "absence")}
+                ${choice("radio", "category", "type-cat-work", "Arbetstid utan kund och projekt", "T.ex. utbildning, kurs eller möte. Räknas som arbete i summor och export.", false, false, "work")}
+              </div>
+            </fieldset>`}
+      `,
       actions: html`<button type="button" class="btn btn--secondary" data-close>Avbryt</button>
         <button type="submit" class="btn btn--primary">${type ? "Spara" : "Lägg till"}</button>`,
       onSubmit: async ({ form }) => {
-        await store.saveTimeType({ id: type?.id, name: form.elements.name.value, hidden: type?.hidden ?? false });
-        notify(type ? "Namnet är ändrat" : "Frånvarotypen är tillagd");
+        await store.saveTimeType({ id: type?.id, name: form.elements.name.value, hidden: type?.hidden ?? false, category: form.elements.category?.value });
+        notify(type ? "Namnet är ändrat" : `${form.elements.name.value.trim()} är tillagd`);
         return "done";
       },
     }).then((result) => result === "done" && reload());
   }
 
-  async function vehicleDialog(vehicle = null) {
+  // Lägg till fordon: ur den färdiga listan (dolda standardfordon) eller ett eget
+  async function addVehicleDialog() {
+    const ready = settings.vehicleTypes.filter((v) => v.hidden && !v.retired);
+    const rateText = (v) =>
+      v.isCompanyCar ? "Ingen ersättning" : v.ratePerMil !== null && v.ratePerMil !== undefined ? `${shortNumber(v.ratePerMil)} kr/mil` : "Inget belopp";
     await openDialog({
-      title: vehicle ? `Redigera ${vehicle.name}` : "Nytt fordon",
+      title: "Lägg till fordon",
       body: html`
-        ${field({ id: "veh-name", label: "Namn", control: input({ id: "veh-name", name: "name", value: vehicle?.name, autocomplete: "off", required: true }) })}
-        ${field({
-          id: "veh-rate",
-          label: "Ersättning per mil (kr)",
-          optional: true,
-          help: "Kontrollera Skatteverkets aktuella belopp.",
-          control: input({ id: "veh-rate", name: "ratePerMil", value: shortNumber(vehicle?.ratePerMil), inputmode: "decimal", autocomplete: "off", help: true }),
-        })}
+        ${ready.length
+          ? html`<div class="stack stack--s">
+              ${ready.map((v) => html`<button type="submit" class="quick" value="${v.id}" aria-label="Lägg till ${v.name}, ${rateText(v)}">
+                <span class="row__icon">${icon("car", 19)}</span>
+                <span class="row__body">
+                  <span class="row__title">${v.name}</span>
+                  <span class="row__meta">${[rateText(v), VEHICLE_INFO[v.id]].filter(Boolean).join(" · ")}</span>
+                </span>
+                <span class="row__arrow">${icon("plus")}</span>
+              </button>`)}
+            </div>`
+          : ""}
+        <h3 class="section-label">Eget fordon</h3>
+        <div class="grid-2">
+          ${field({ id: "veh-name", label: "Namn", control: input({ id: "veh-name", name: "name", autocomplete: "off" }) })}
+          ${field({
+            id: "veh-rate",
+            label: "Belopp per mil (kr)",
+            optional: true,
+            control: input({ id: "veh-rate", name: "ratePerMil", inputmode: "decimal", autocomplete: "off" }),
+          })}
+        </div>
       `,
       actions: html`<button type="button" class="btn btn--secondary" data-close>Avbryt</button>
-        <button type="submit" class="btn btn--primary">${vehicle ? "Spara" : "Lägg till"}</button>`,
+        <button type="submit" class="btn btn--primary" value="custom">Lägg till eget fordon</button>`,
+      onSubmit: async ({ form, action }) => {
+        if (action === "custom") {
+          const rate = parseAmount(form.elements.ratePerMil.value);
+          if (Number.isNaN(rate)) throw Object.assign(new Error("Kontrollera beloppet."), { fields: { ratePerMil: "Ange ett belopp, t.ex. 25 eller 12,50." } });
+          await store.saveVehicleType({ name: form.elements.name.value, ratePerMil: rate });
+          notify(`${form.elements.name.value.trim()} är tillagt`);
+          return "done";
+        }
+        const v = ready.find((x) => x.id === action);
+        if (!v) return false;
+        await store.saveVehicleType({ ...v, hidden: false });
+        notify(`${v.name} är tillagd`);
+        return "done";
+      },
+    }).then((result) => result === "done" && reload());
+  }
+
+  async function renameVehicleDialog(vehicle) {
+    await openDialog({
+      title: `Byt namn på ${vehicle.name}`,
+      body: field({ id: "veh-rename", label: "Namn", control: input({ id: "veh-rename", name: "name", value: vehicle.name, autocomplete: "off", required: true }) }),
+      actions: html`<button type="button" class="btn btn--secondary" data-close>Avbryt</button>
+        <button type="submit" class="btn btn--primary">Spara</button>`,
       onSubmit: async ({ form }) => {
-        const rate = parseAmount(form.elements.ratePerMil.value);
-        if (Number.isNaN(rate)) throw Object.assign(new Error("Kontrollera beloppet."), { fields: { ratePerMil: "Ange ett belopp, t.ex. 25 eller 12,50." } });
-        await store.saveVehicleType({ id: vehicle?.id, name: form.elements.name.value, ratePerMil: rate, hidden: vehicle?.hidden ?? false });
-        notify(vehicle ? "Fordonet är sparat" : "Fordonet är tillagt");
+        await store.saveVehicleType({ ...vehicle, name: form.elements.name.value });
+        notify("Namnet är ändrat");
         return "done";
       },
     }).then((result) => result === "done" && reload());
@@ -548,6 +660,24 @@ export async function render(container, ctx) {
         await store.saveSettings({ overtime: { mode: form.elements.mode.value, factor } });
         notify("Övertiden är sparad");
       }
+      if (form.matches("[data-rates-form]")) {
+        const rates = {};
+        const errors = {};
+        for (const el of form.querySelectorAll('input[name^="rate-"]')) {
+          const value = parseAmount(el.value);
+          if (Number.isNaN(value)) errors[el.name] = "Ange ett belopp, t.ex. 25 eller 12,50.";
+          rates[el.name.slice(5)] = value;
+        }
+        if (Object.keys(errors).length) throw Object.assign(new Error("Kontrollera beloppen."), { fields: errors });
+        await store.saveVehicleRates(rates);
+        notify("Beloppen är sparade");
+      }
+      if (form.matches("[data-projects-form]")) {
+        await store.saveSettings({ projects: { enabled: form.elements.enabled.checked } });
+        notify(form.elements.enabled.checked ? "Projekt används" : "Projekt används inte – tiden rapporteras på kunder");
+        await ctx.refresh(); // menyn heter Kunder eller Kunder & projekt
+        return;
+      }
       if (form.matches("[data-travel-form]")) {
         const value = (name) => form.elements[name].checked;
         await store.saveSettings({
@@ -602,9 +732,9 @@ export async function render(container, ctx) {
     if (target.closest("[data-new-type]")) return typeDialog();
     const rename = target.closest("[data-rename]");
     if (rename) return typeDialog(settings.timeTypes.find((t) => t.id === rename.dataset.rename));
-    if (target.closest("[data-new-vehicle]")) return vehicleDialog();
-    const editVehicle = target.closest("[data-edit-vehicle]");
-    if (editVehicle) return vehicleDialog(settings.vehicleTypes.find((v) => v.id === editVehicle.dataset.editVehicle));
+    if (target.closest("[data-add-vehicle]")) return addVehicleDialog();
+    const renameVehicle = target.closest("[data-rename-vehicle]");
+    if (renameVehicle) return renameVehicleDialog(settings.vehicleTypes.find((v) => v.id === renameVehicle.dataset.renameVehicle));
 
     try {
       const toggle = target.closest("[data-toggle-hidden]");
@@ -618,13 +748,13 @@ export async function render(container, ctx) {
       const toggleVehicle = target.closest("[data-toggle-vehicle]");
       if (toggleVehicle) {
         const v = settings.vehicleTypes.find((x) => x.id === toggleVehicle.dataset.toggleVehicle);
-        await store.saveVehicleType({ ...v, hidden: !v.hidden });
-        notify(v.hidden ? `${v.name} visas igen` : `${v.name} är dold`);
+        await store.saveVehicleType({ ...v, hidden: true });
+        notify(`${v.name} är borttagen från listan – du kan lägga till den igen`);
         await reload();
-        $(`[data-toggle-vehicle="${v.id}"]`)?.focus();
+        $("[data-add-vehicle]")?.focus();
       }
       if (target.closest("[data-rates-checked]")) {
-        await store.saveSettings({ ratesCheckedAt: today() });
+        await store.confirmVehicleRates();
         notify("Beloppen är markerade som kontrollerade");
         await reload();
       }
@@ -635,11 +765,11 @@ export async function render(container, ctx) {
       }
       const purge = target.closest("[data-purge]");
       if (purge) {
-        const count = Number(purge.dataset.count);
+        const what = purge.dataset.what;
         const cutoff = purge.dataset.purge;
         const first = await confirmDialog({
-          title: `Radera ${plural(count, "registrering", "registreringar")}?`,
-          message: `Alla registreringar före ${formatDate(cutoff)} raderas permanent. Exportera gärna en säkerhetskopia först.`,
+          title: `Radera ${what}?`,
+          message: `Alla registreringar och allt material från lagret före ${formatDate(cutoff)} raderas permanent. Exportera gärna en säkerhetskopia först.`,
           confirmLabel: "Fortsätt",
           danger: true,
         });
@@ -653,7 +783,10 @@ export async function render(container, ctx) {
         });
         if (!second) return;
         const result = await store.purgeEntriesBefore(cutoff);
-        notify(`${plural(result.entries, "registrering", "registreringar")} raderade`);
+        notify([
+          result.entries ? plural(result.entries, "registrering raderad", "registreringar raderade") : "",
+          result.materials ? `${plural(result.materials, "rad", "rader")} material från lagret raderade` : "",
+        ].filter(Boolean).join(", "));
         await reload();
       }
     } catch (error) {

@@ -297,7 +297,7 @@ async function setupTests(browser) {
 
     await page.waitForFunction(() => location.hash === "#/kom-igang");
     await page.locator(".sidebar__company", { hasText: "Testföretaget AB" }).waitFor();
-    await page.getByText("1 av 4 klart").waitFor();
+    await page.getByText("0 av 4 klart").waitFor();
     const settings = await page.evaluate(async () => (await import("./js/store.js")).getSettings());
     check(settings.workWeek.mon === 8 && settings.workWeek.sat === 0 && settings.orgNumber === "", "Förvalen sparades fel");
     await page.goto(BASE + "#/signup");
@@ -310,13 +310,19 @@ async function setupTests(browser) {
     const { context, page } = await openWithAdmin(browser, "#/kom-igang", {}, { loggedIn: true });
     const current = await page.locator('.nav__link[aria-current="page"]').textContent();
     check(current.includes("Kom igång"), "Kom igång är inte markerad i menyn");
-    await page.getByText("1 av 4 klart").waitFor();
+    await page.getByText("0 av 4 klart").waitFor();
     await page.evaluate(async () => {
       const store = await import("./js/store.js");
       const customer = await store.saveCustomer({ customerNo: "1", name: "Kund AB" });
       await store.saveProject({ customerId: customer.id, projectNo: "L-1", name: "Projekt" });
       await store.saveUser({ name: "Maja M", employeeNo: "2", email: "maja@exempel.se", role: "employee" });
     });
+    await page.reload();
+    await page.getByText("3 av 4 klart").waitFor();
+    await page.evaluate(async () => (await import("./js/store.js")).saveSettings({ orgNumber: "556677-8899" }));
+    await page.reload();
+    await page.getByText("3 av 4 klart").waitFor();
+    await page.evaluate(async () => (await import("./js/store.js")).saveSettings({ companyName: "Testföretaget" }));
     await page.reload();
     await page.getByText("4 av 4 klart").waitFor();
     await page.getByText("Nu kan dina medarbetare logga in").waitFor();
@@ -331,6 +337,7 @@ async function projectTests(browser) {
 
     await page.locator(".page-head").getByRole("button", { name: "Ny kund" }).click();
     const dialog = page.locator("dialog[open]");
+    await dialog.getByLabel("Kundnummer").fill("");
     await dialog.getByRole("button", { name: "Lägg till kund" }).click();
     check((await dialog.locator('[name="customerNo"]').getAttribute("aria-invalid")) === "true", "Tomt kundnummer godkändes");
     check((await dialog.locator('[name="name"]').getAttribute("aria-invalid")) === "true", "Tomt namn godkändes");
@@ -347,7 +354,7 @@ async function projectTests(browser) {
     await dialog.getByLabel("Projektnamn").fill("Takbyte");
     await dialog.getByRole("button", { name: "Lägg till projekt" }).click();
     await page.waitForSelector("dialog", { state: "detached" });
-    await page.locator(".row", { hasText: "L-2041 · Takbyte" }).getByText("Pågående").waitFor();
+    await page.locator(".project", { hasText: "L-2041 · Takbyte" }).getByText("Pågående").waitFor();
 
     await page.locator(".page-head").getByRole("button", { name: "Nytt projekt" }).click();
     await dialog.getByLabel("Kund", { exact: true }).selectOption({ label: "Brf Almen (kundnr 100)" });
@@ -379,7 +386,7 @@ async function projectTests(browser) {
     await page.waitForSelector("dialog", { state: "detached" });
     await page.getByText("1 projekt").waitFor();
     await page.getByLabel("Status").selectOption("all");
-    await page.locator(".row", { hasText: "L-1 · Takbyte" }).getByText("Avslutat").waitFor();
+    await page.locator(".project", { hasText: "L-1 · Takbyte" }).getByText("Avslutat").waitFor();
 
     await page.getByLabel("Kund", { exact: true }).selectOption({ label: "Villa Holm" });
     await page.getByText("1 projekt").waitFor();
@@ -431,6 +438,9 @@ async function staffTests(browser) {
     await page.getByText("Lägg till din första medarbetare").waitFor();
     await page.locator(".page-head").getByRole("button", { name: "Ny anställd" }).click();
     const dialog = page.locator("dialog[open]");
+    // Nästa lediga nummer föreslås – töm det för att se fältfelet
+    check((await dialog.getByLabel("Anställningsnummer").inputValue()) === "2", "Nästa anställningsnummer föreslogs inte");
+    await dialog.getByLabel("Anställningsnummer").fill("");
     await dialog.getByRole("button", { name: "Lägg till och visa lösenord" }).click();
     for (const name of ["name", "employeeNo", "email"]) {
       check((await dialog.locator(`[name="${name}"]`).getAttribute("aria-invalid")) === "true", `${name} markerades inte`);
@@ -558,7 +568,7 @@ async function staffTests(browser) {
     await page.getByText("2 av 3 klart").waitFor();
 
     await page.goto(BASE + "#/projekt");
-    await page.locator(".row", { hasText: "P-1 · Projektet" }).waitFor();
+    await page.locator(".project", { hasText: "P-1 · Projektet" }).waitFor();
     check(!(await page.getByRole("button", { name: "Nytt projekt" }).count()), "Medarbetaren kan lägga till projekt");
     check(!(await page.getByRole("button", { name: /Redigera/ }).count()), "Medarbetaren kan redigera projekt");
 
@@ -589,12 +599,16 @@ async function staffTests(browser) {
     await context.close();
   });
 
-  await test("Mer (mobil, admin): länkar till Kom igång, Anställda, Material, Inställningar och Profil", async () => {
+  await test("Mobil (admin): Kom igång har en egen flik, Mer länkar till Anställda, Inställningar och Profil", async () => {
     const { context, page } = await openWithAdmin(browser, "#/tid", devices["Pixel 7"], { loggedIn: true });
+    // Bara flikarnas namn – inte räknaren för material (dold, men innehåller "0")
+    const tabs = await page.locator(".tabbar__link > span:not(.count-badge)").allTextContents();
+    check(tabs.map((t) => t.replace(/\s+/g, " ").trim()).join("|") === "Tid|Granska|Projekt|Kom igång|Mer", `Fel flikar: ${tabs.join(", ")}`);
     await page.locator(".tabbar").getByRole("link", { name: "Mer" }).click();
     await page.waitForFunction(() => location.hash === "#/mer");
     check(!(await page.locator("main").getByRole("link", { name: /Material/ }).count()), "Material visas fast det är av");
-    for (const name of ["Kom igång", "Anställda", "Inställningar", "Profil"]) {
+    check(!(await page.locator("main").getByRole("link", { name: /Kom igång/ }).count()), "Kom igång ska inte ligga under Mer");
+    for (const name of ["Anställda", "Inställningar", "Profil"]) {
       await page.locator("main").getByRole("link", { name: new RegExp(name) }).waitFor();
     }
     await page.locator("main").getByRole("link", { name: /Anställda/ }).click();
@@ -641,9 +655,9 @@ async function timeTests(browser) {
     await page.getByLabel("Kommentar").fill("Rivning");
     await page.getByRole("button", { name: "Spara registrering" }).click();
     await page.getByText("Registreringen är sparad").waitFor();
-    await page.locator(".row", { hasText: "Brf Almen · P-1 Takbyte" }).getByText("Utkast").waitFor();
+    await page.locator(".row", { hasText: "Brf Almen · P-1 Takbyte" }).getByText("Väntar på granskning").waitFor();
     check((await page.locator("#time-hours").inputValue()) === "0,5", "Kvarvarande tid förifylldes inte");
-    await page.locator("[data-today]").getByText("av 8,0 h programmerad · 0,5 h kvar").waitFor();
+    await page.locator("[data-today]").getByText("av 8,0 h enligt schema · 0,5 h kvar").waitFor();
 
     // För många timmar samma dag
     await page.locator("#time-customer").selectOption({ label: "Brf Almen" });
@@ -712,13 +726,41 @@ async function timeTests(browser) {
     await page.reload();
     check((await page.locator("[data-toggle=\"trip\"]").getAttribute("aria-expanded")) === "true", "Resa ska minnas efter omladdning");
 
-    // Frånvaro: ingen kund, inget projekt, ingen resa
+    // Frånvaro: ingen kund, inget projekt, ingen resa – och Typ av tid står först
+    const firstField = await page.locator("[data-time-form] select").first().getAttribute("id");
+    check(firstField === "time-type", `Typ av tid ska stå först, inte ${firstField}`);
     await typeSelect.selectOption({ label: "VAB" });
-    check(await page.locator("#time-customer").isDisabled(), "Kund ska inte behövas vid frånvaro");
+    check(!(await page.locator("#time-customer").count()), "Kund ska döljas vid frånvaro");
+    check(!(await page.locator("#time-project").count()), "Projekt ska döljas vid frånvaro");
     check(!(await page.locator("[data-toggle=\"trip\"]").count()), "Resa ska inte visas vid frånvaro");
-    await page.getByText("Frånvaro kräver ingen kund eller projekt.").first().waitFor();
+    await page.getByText("Frånvaro kräver varken kund eller projekt.").first().waitFor();
     await page.getByRole("button", { name: "Spara registrering" }).click();
     await page.locator(".row", { hasText: "VAB" }).waitFor();
+    await context.close();
+  });
+
+  await test("Tidrapport: frånvaro för flera dagar sparas en rad per arbetsdag", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/kom-igang", {}, { loggedIn: true });
+    await seedProjects(page);
+    // Tisdagen har redan tid och ska hoppas över
+    await page.evaluate(async () => (await import("./js/store.js")).saveEntry({ date: "2026-09-22", hours: 2, timeTypeId: "sjuk" }));
+    await page.goto(BASE + "#/tid/2026-09-21");
+    await page.reload();
+    await page.getByLabel("Typ av tid").selectOption({ label: "Semester" });
+    await page.getByRole("button", { name: "Registrera frånvaro" }).waitFor();
+    check((await page.getByLabel("Kommentar").getAttribute("placeholder")) === "T.ex. något administratören behöver veta", "Fel exempeltext vid frånvaro");
+    await page.getByLabel("Till och med").fill("2026-09-27");
+    await page.getByLabel("Till och med").dispatchEvent("change");
+    // Datumet visas som i fältet Datum, inte 2026-09-27
+    await page.locator(".date-field__text", { hasText: "Söndag 27 september" }).waitFor();
+    await page.getByText("Varje arbetsdag får timmarna enligt ditt schema.", { exact: false }).waitFor();
+    check(!(await page.locator("#time-hours").isVisible()), "Timmar ska döljas för flera dagar");
+    await page.getByRole("button", { name: "Spara registrering" }).click();
+    await page.getByText("Semester är sparad för 4 dagar – tis 22 sep hade redan tid och hoppades över").waitFor();
+    const saved = await page.evaluate(async () =>
+      (await (await import("./js/store.js")).listEntries({ timeTypeId: "semester" })).map((e) => `${e.date} ${e.hours}`),
+    );
+    check(saved.join() === "2026-09-21 8,2026-09-23 8,2026-09-24 8,2026-09-25 8", `Fel rader: ${saved.join()}`);
     await context.close();
   });
 
@@ -738,12 +780,12 @@ async function timeTests(browser) {
     check((await page.locator(".row").count()) === 2, "Det ska bli två rader");
     await page.locator("[data-today] .stat", { hasText: "Registrerat" }).getByText("8,0 h").waitFor();
     await page.locator("[data-today] .stat", { hasText: "Övertid" }).getByText("2,0 h").waitFor();
-    await page.locator("[data-today]").getByText("av 8,0 h programmerad · 0,0 h kvar").waitFor();
+    await page.locator("[data-today]").getByText("av 8,0 h enligt schema · 0,0 h kvar").waitFor();
 
     // Övertid förifylls inte med schemat
     await page.getByLabel("Typ av tid").selectOption({ label: "Övertid – komptid" });
     check((await page.locator("#time-hours").inputValue()) === "0,0", "Övertid ska inte förifyllas");
-    await page.getByText("ersätts med komptid").waitFor();
+    await page.getByText("Komptid = du får ledigt motsvarande tid senare.").first().waitFor();
     await context.close();
   });
 
@@ -771,10 +813,16 @@ async function timeTests(browser) {
     await page.getByText("Namnet är ändrat").waitFor();
     await page.getByRole("button", { name: "Dölj Permission" }).click();
     await page.locator(".row", { hasText: "Permission" }).getByText("Dold").waitFor();
-    await page.getByRole("button", { name: "Ny frånvarotyp" }).click();
+    await page.getByRole("button", { name: "Ny typ av tid" }).click();
     await page.locator("dialog[open]").getByLabel("Namn").fill("Studiedag");
     await page.locator("dialog[open]").getByRole("button", { name: "Lägg till" }).click();
     await page.locator(".row", { hasText: "Studiedag" }).waitFor();
+    // Ny typ som räknas som arbetstid utan kund och projekt
+    await page.getByRole("button", { name: "Ny typ av tid" }).click();
+    await page.locator("dialog[open]").getByLabel("Namn").fill("Kurs");
+    await page.locator("dialog[open]").getByLabel("Arbetstid utan kund och projekt").check();
+    await page.locator("dialog[open]").getByRole("button", { name: "Lägg till" }).click();
+    await page.locator(".row", { hasText: "Kurs" }).getByText("Arbetstid utan kund och projekt").waitFor();
 
     await page.goto(BASE + `#/tid/${DAY}`);
     await page.reload();
@@ -782,7 +830,12 @@ async function timeTests(browser) {
     const options = await page.getByLabel("Typ av tid").locator("option").allTextContents();
     check(!options.includes("Övertid – komptid"), "Komptid visas fast bara lön är tillåtet");
     check(options.includes("Övertid – lön"), `Övertid – lön saknas: ${options.join(", ")}`);
-    check(options.includes("Vård av barn") && options.includes("Studiedag"), "Namnbyte eller ny typ syns inte");
+    check(options.includes("Vård av barn") && options.includes("Studiedag") && options.includes("Kurs"), "Namnbyte eller ny typ syns inte");
+    // Kurs: ingen kund eller projekt, räknas som arbete
+    await page.getByLabel("Typ av tid").selectOption({ label: "Kurs" });
+    check(!(await page.locator("#time-customer").count()), "Kurs ska inte kräva kund");
+    await page.getByText("Räknas som arbetstid.", { exact: false }).first().waitFor();
+    await page.getByLabel("Typ av tid").selectOption({ label: "Arbete" });
     check(!options.includes("Permission"), "Dold typ visas");
     await page.locator("[data-toggle=\"trip\"]").click();
     await page.getByText("Restiden debiteras kunden.").waitFor();
@@ -949,7 +1002,7 @@ async function materialTests(browser) {
     await context.close();
   });
 
-  await test("Material: artikellista med förslag per bransch, egen artikel och dölja", async () => {
+  await test("Material: artikellista med förslag för bygg, egen artikel och dölja", async () => {
     const { context, page } = await openWithAdmin(browser, "#/kom-igang", {}, { loggedIn: true });
     await page.evaluate(async () => {
       const store = await import("./js/store.js");
@@ -959,20 +1012,24 @@ async function materialTests(browser) {
     await page.reload();
     await page.locator("h1", { hasText: "Produkter" }).waitFor();
     await page.getByText("Lägg till er första artikel").waitFor();
-    await page.getByRole("button", { name: "Visa förslag per bransch" }).click();
-    await page.locator("dialog[open]").getByRole("button", { name: /Frisör/ }).click();
-    await page.getByText("7 artiklar lades till").waitFor();
-    await page.locator(".row", { hasText: "Hårfärg" }).getByText("Enhet: tub").waitFor();
+    await page.getByRole("button", { name: "Visa förslag på artiklar" }).click();
+    await page.locator("dialog[open]").getByRole("button", { name: "Lägg till 10 artiklar" }).click();
+    await page.getByText("10 artiklar lades till").waitFor();
+    await page.locator(".row", { hasText: "Fogmassa" }).getByText("Enhet: tub").waitFor();
+    // Andra gången finns allt redan
+    await page.getByRole("button", { name: "Förslag på artiklar" }).click();
+    await page.locator("dialog[open]").getByText("Alla förslag finns redan i artikellistan.").waitFor();
+    await page.locator("dialog[open]").getByRole("button", { name: "Stäng" }).last().click();
 
     await page.getByRole("button", { name: "Ny artikel" }).click();
     const dialog = page.locator("dialog[open]");
-    await dialog.getByLabel("Namn").fill("Toner");
-    await dialog.getByLabel("Enhet").fill("ml");
-    await dialog.getByLabel("Artikelnummer").fill("T-1");
+    await dialog.getByLabel("Namn").fill("Silikon");
+    await dialog.getByLabel("Enhet").fill("tub");
+    await dialog.getByLabel("Artikelnummer").fill("S-1");
     await dialog.getByRole("button", { name: "Lägg till" }).click();
-    await page.locator(".row", { hasText: "Toner" }).getByText("Art.nr T-1").waitFor();
-    await page.getByRole("button", { name: "Dölj Folie" }).click();
-    await page.locator(".row", { hasText: "Folie" }).getByText("Dold").waitFor();
+    await page.locator(".row", { hasText: "Silikon" }).getByText("Art.nr S-1").waitFor();
+    await page.getByRole("button", { name: "Dölj Tejp" }).click();
+    await page.locator(".row", { hasText: "Tejp" }).getByText("Dold").waitFor();
     await context.close();
   });
 
@@ -982,7 +1039,7 @@ async function materialTests(browser) {
     await page.evaluate(async () => {
       const store = await import("./js/store.js");
       await store.saveSettings({ materials: { enabled: true, label: "Material", allowFreeText: true } });
-      await store.addArticleTemplate("bygg");
+      await store.addArticleTemplate();
     });
     await page.goto(BASE + `#/tid/${DAY}`);
     await page.reload();
@@ -1001,7 +1058,7 @@ async function materialTests(browser) {
     await page.locator("label", { hasText: "Antal (kg)" }).waitFor();
     await page.getByLabel("Meddelande").fill("Beställ mer");
     await page.getByRole("button", { name: "Spara registrering" }).click();
-    await page.getByText("Tiden och uttaget är sparade").waitFor();
+    await page.getByText("Tiden är sparad, och från lagret: Skruv · 2,5 kg").waitFor();
     await page.locator("[data-list] .row", { hasText: "Brf Almen · P-1 Takbyte" }).waitFor();
     await page.locator("[data-material-list] .row", { hasText: "Skruv · 2,5 kg" }).getByText("Ny").waitFor();
     check((await materialToggle.getAttribute("aria-expanded")) === "false", "Material ska stängas efter sparat");
@@ -1017,7 +1074,7 @@ async function materialTests(browser) {
     await page.getByLabel(/Antal/).fill("12");
     check((await page.locator('[data-summary="material"]').textContent()) === "Lister · 12 m", "Sammanfattningen visar inte materialet");
     await page.getByRole("button", { name: "Spara registrering" }).click();
-    await page.getByText("Uttaget är registrerat").waitFor();
+    await page.getByText("Sparat från lagret: Lister · 12 m").waitFor();
     await page.locator("[data-material-list] .row", { hasText: "Lister · 12 m" }).waitFor();
     check((await page.locator("[data-list] .row").count()) === 1, "En tidrad med 0 timmar sparades");
     await page.locator('.nav__link[href="#/material"] .count-badge', { hasText: "2" }).waitFor();
@@ -1025,19 +1082,20 @@ async function materialTests(browser) {
     // Admin hanterar
     await page.goto(BASE + "#/material");
     await page.locator(".row", { hasText: "Skruv · 2,5 kg" }).getByText("”Beställ mer”").waitFor();
-    await page.getByRole("button", { name: "Markera som hanterad: Skruv" }).click();
-    await page.getByText("Uttaget är hanterat").waitFor();
+    await page.getByText("Markera som klar", { exact: false }).first().waitFor();
+    await page.getByRole("button", { name: "Markera som klar: Skruv" }).click();
+    await page.getByText("Skruv är markerad som klar").waitFor();
     await page.locator('.nav__link[href="#/material"] .count-badge', { hasText: "1" }).waitFor();
     await page.getByLabel("Status").selectOption("handled");
-    await page.locator(".row", { hasText: "Skruv" }).getByText("Hanterad").waitFor();
+    await page.locator(".row", { hasText: "Skruv" }).getByText("Klar", { exact: true }).waitFor();
 
-    // Hanterat uttag kan inte tas bort av medarbetaren
+    // Det som är markerat som klart kan inte tas bort av medarbetaren
     await page.goto(BASE + `#/tid/${DAY}`);
-    await page.locator("[data-material-list] .row", { hasText: "Skruv" }).getByText("Hanterad").waitFor();
-    check(!(await page.getByRole("button", { name: /^Ta bort Skruv/ }).count()), "Hanterat uttag går att ta bort");
+    await page.locator("[data-material-list] .row", { hasText: "Skruv" }).getByText("Klar", { exact: true }).waitFor();
+    check(!(await page.getByRole("button", { name: /^Ta bort Skruv/ }).count()), "Klar rad går att ta bort");
     await page.getByRole("button", { name: /^Ta bort Lister/ }).click();
     await page.locator("dialog[open]").getByRole("button", { name: "Ta bort" }).click();
-    await page.getByText("Uttaget är borttaget").waitFor();
+    await page.getByText("Lister är borttagen").waitFor();
     await context.close();
   });
 
@@ -1146,7 +1204,7 @@ async function reviewTests(browser) {
     await page.getByLabel("Anställd").selectOption({ label: "Maja Medarbetare" });
     check((await page.locator(".person").count()) === 1, "Filtret på anställd fungerar inte");
     let [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Tid (CSV)" }).click()]);
-    check(download.suggestedFilename() === "tidla-underlag-2026-09.csv", `Fel filnamn: ${download.suggestedFilename()}`);
+    check(download.suggestedFilename() === "tidla-underlag-2026-09-maja-medarbetare.csv", `Fel filnamn: ${download.suggestedFilename()}`);
     let csv = await readDownload(download);
     const lines = csv.split("\r\n").filter(Boolean);
     check(lines[0].startsWith("﻿Datum;Anställd;"), "Rubrikraden saknas");
@@ -1159,7 +1217,7 @@ async function reviewTests(browser) {
     await page.getByText("Det finns inga rader att exportera").waitFor();
 
     [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Material (CSV)" }).click()]);
-    check(download.suggestedFilename() === "tidla-material-2026-09.csv", "Fel filnamn för material");
+    check(download.suggestedFilename() === "tidla-material-2026-09-maja-medarbetare.csv", `Fel filnamn för material: ${download.suggestedFilename()}`);
     csv = await readDownload(download);
     check(csv.includes(";Skruv;;2;kg;") && !csv.includes("Olle Ek"), "Materialfilen följer inte filtren");
     await context.close();
@@ -1181,6 +1239,8 @@ async function reviewTests(browser) {
     await page.locator("h1", { hasText: "Granska" }).waitFor();
     check((await page.locator(".person").count()) === 1, "Medarbetaren ser andras tid");
     check(!(await page.getByRole("button", { name: /Godkänn|Markera|CSV/ }).count()), "Medarbetaren ser admin-knappar");
+    // Veckans status syns utan att man fäller ut veckan
+    await page.locator(".week", { hasText: "Vecka 39" }).getByText("1 nekad", { exact: true }).waitFor();
     await page.getByRole("button", { name: /Vecka 39/ }).click();
     await page.getByText("Nekad: Fel projekt").waitFor();
 
@@ -1188,7 +1248,251 @@ async function reviewTests(browser) {
     await page.getByText("1 nekad registrering att rätta.").waitFor();
     await page.getByRole("link", { name: "Visa tisdag 22 september" }).click();
     await page.waitForFunction(() => location.hash === "#/tid/2026-09-22");
-    await page.getByText("Se listan nedan").waitFor();
+    await page.getByText("1 nekad registrering att rätta i listan nedan.").waitFor();
+    await context.close();
+  });
+}
+
+async function laterFixTests(browser) {
+  await test("Granskning: inlagd frånvaro framåt räknas inte som plustid", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/kom-igang", {}, { loggedIn: true });
+    const month = await page.evaluate(async () => {
+      const s = await import("./js/store.js");
+      const d = await import("./js/lib/dates.js");
+      const from = d.addDays(d.today(), 1);
+      await s.saveAbsenceRange({ from, to: d.addDays(from, 13), timeTypeId: "semester" });
+      return d.currentMonth();
+    });
+    await page.goto(BASE + `#/granska/${month}`);
+    await page.reload();
+    const person = page.locator(".person", { hasText: "Test Admin" });
+    await person.getByText("(±0 h)").waitFor();
+    check(!(await person.getByText("(+", { exact: false }).count()), "Frånvaro framåt räknas som plustid");
+    await context.close();
+  });
+
+  await test("Mobil (360px): övertidsrutans knappar ryms på skärmen", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/kom-igang", { viewport: { width: 360, height: 760 }, isMobile: true, hasTouch: true }, { loggedIn: true });
+    await seedProjects(page);
+    await page.goto(BASE + `#/tid/${DAY}`);
+    await page.reload();
+    await page.locator("#time-customer").selectOption({ label: "Brf Almen" });
+    await page.locator("#time-project").selectOption({ label: "P-1 · Takbyte" });
+    await page.locator("#time-hours").fill("10");
+    await page.locator("#time-hours").dispatchEvent("input");
+    await page.getByRole("button", { name: "Spara som övertid – komptid" }).waitFor();
+    // Knapparna ska hålla sig innanför rutans kant (före rättelsen: 3,8 px utanför på 360 px)
+    const outside = await page.evaluate(() => {
+      const hint = document.querySelector(".overtime-hint");
+      const edge = hint.getBoundingClientRect().right - parseFloat(getComputedStyle(hint).paddingRight);
+      return [...hint.querySelectorAll(".btn")].filter((b) => b.getBoundingClientRect().right > edge + 0.5).length;
+    });
+    check(!outside, `${outside} knappar sticker ut ur övertidsrutan`);
+    await context.close();
+  });
+
+  await test("Mobil (320px): Tema, Logga ut och veckoraden ryms utan att klippas", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/profil", { viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true }, { loggedIn: true });
+    await page.evaluate(async () => (await import("./js/store.js")).saveSettings({ companyName: "Snickeri Exempel med långt namn AB" }));
+    await page.reload();
+    await page.locator("h1", { hasText: "Profil" }).waitFor();
+    const profile = await page.evaluate(() => {
+      const theme = document.querySelector(".segmented");
+      const card = document.querySelector("[data-profile-logout]").closest(".card").getBoundingClientRect();
+      const logout = document.querySelector("[data-profile-logout]").getBoundingClientRect();
+      return { themeScroll: theme.scrollWidth - theme.clientWidth, logoutOutside: logout.right - card.right };
+    });
+    check(profile.themeScroll <= 0, `Temaväljaren skrollar ${profile.themeScroll}px i sidled`);
+    check(profile.logoutOutside <= 0, `Logga ut sticker ut ${profile.logoutOutside}px ur kortet`);
+    await page.goto(BASE + `#/tid/${DAY}`);
+    await page.reload();
+    const label = await page.locator(".week-head__label").evaluate((el) => ({ text: el.textContent.trim(), cut: el.scrollWidth - el.clientWidth }));
+    check(label.text === "Vecka 39" && label.cut <= 0, `Veckoraden: "${label.text}" klipps ${label.cut}px`);
+    await page.locator("[data-mobile-week]").getByText("Snickeri Exempel med långt namn AB").waitFor();
+    await context.close();
+  });
+
+  await test("Förslag på nummer och förval när det bara finns ett alternativ", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/projekt/kunder", {}, { loggedIn: true });
+    await page.getByRole("button", { name: "Ny kund" }).first().click();
+    let dialog = page.locator("dialog[open]");
+    check((await dialog.getByLabel("Kundnummer").inputValue()) === "1", "Första kundnumret föreslogs inte");
+    await dialog.getByText("Förslag: nästa lediga nummer.", { exact: false }).waitFor();
+    await dialog.getByLabel("Namn").fill("Brf Almen");
+    await dialog.getByRole("button", { name: "Lägg till kund" }).click();
+    await page.getByText("Kunden är tillagd").waitFor();
+
+    // Bara en kund – den är förvald i Nytt projekt
+    await page.getByRole("button", { name: "Nytt projekt" }).click();
+    dialog = page.locator("dialog[open]");
+    check((await dialog.getByLabel("Kund").locator("option:checked").textContent()).startsWith("Brf Almen"), "Den enda kunden är inte förvald");
+    check((await dialog.getByLabel("Projektnummer").inputValue()) === "1", "Första projektnumret föreslogs inte");
+    await dialog.getByLabel("Projektnamn").fill("Takbyte");
+    await dialog.getByRole("button", { name: "Lägg till projekt" }).click();
+    await page.getByText("Projektet är tillagt").waitFor();
+    await page.getByRole("button", { name: "Ny kund" }).first().click();
+    check((await page.locator("dialog[open]").getByLabel("Kundnummer").inputValue()) === "2", "Nästa kundnummer ska vara 2");
+    await page.locator("dialog[open]").getByRole("button", { name: "Avbryt" }).click();
+
+    // Tidrapporten: den enda kunden och det enda projektet är förvalda
+    await page.goto(BASE + `#/tid/${DAY}`);
+    await page.reload();
+    check((await page.locator("#time-customer option:checked").textContent()) === "Brf Almen", "Kunden är inte förvald");
+    check((await page.locator("#time-project option:checked").textContent()) === "1 · Takbyte", "Projektet är inte förvalt");
+    await page.getByRole("button", { name: "Spara registrering" }).click();
+    await page.getByText("Registreringen är sparad").waitFor();
+    await context.close();
+  });
+}
+
+// Dialoger vid sidbyte, nytt projekt, kilometer/mil och fordonslistan
+async function dialogAndVehicleTests(browser) {
+  await test("Dialog stängs vid sidbyte, nytt projekt syns i projektlistan", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/anstallda", {}, { loggedIn: true });
+    await page.locator(".page-head").getByRole("button", { name: "Ny anställd" }).click();
+    await page.locator("dialog[open]").waitFor();
+    await page.evaluate(() => (location.hash = "#/tid"));
+    await page.locator("h1", { hasText: "Lägg till tid" }).waitFor();
+    check(!(await page.locator("dialog[open]").count()), "Dialogen ligger kvar efter sidbyte");
+
+    await seedProjects(page);
+    await page.goto(BASE + "#/projekt/kunder");
+    await page.reload();
+    await page.getByRole("button", { name: "Nytt projekt" }).click();
+    const dialog = page.locator("dialog[open]");
+    await dialog.getByLabel("Kund").selectOption({ label: "Brf Almen (kundnr 100)" });
+    await dialog.getByLabel("Projektnamn").fill("Fasadmålning");
+    await dialog.getByRole("button", { name: "Lägg till projekt" }).click();
+    await page.waitForFunction(() => location.hash === "#/projekt");
+    await page.locator(".project", { hasText: "Fasadmålning" }).waitFor();
+    check((await page.locator('[data-tab="projekt"]').getAttribute("aria-pressed")) === "true", "Fliken Projekt är inte vald");
+    await context.close();
+  });
+
+  await test("Milersättning: kilometer räknas om till mil, knappar har namn, kompakt i mobil", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/kom-igang", {}, { loggedIn: true });
+    await seedProjects(page);
+    await page.goto(BASE + `#/tid/${DAY}`);
+    await page.reload();
+    await page.locator('[data-toggle="trip"]').click();
+    await page.getByLabel("Milersättning").selectOption({ label: "Privat bil" });
+    await page.getByText("10 km = 1 mil. Ersättningen är 25 kr per mil.").waitFor();
+    await page.getByLabel("Körda kilometer").fill("34");
+    await page.getByText("34 km = 3,4 mil · 85 kr").waitFor();
+
+    await page.goto(BASE + "#/installningar/fordon");
+    await page.reload();
+    await page.getByRole("button", { name: "Lägg till fordon" }).click();
+    await page.locator("dialog[open]").getByRole("button", { name: "Lägg till Förmånsbil – el, 9,5 kr/mil" }).waitFor();
+    await page.locator("dialog[open]").getByRole("button", { name: "Avbryt" }).click();
+
+    await page.setViewportSize({ width: 360, height: 760 });
+    const sameLine = await page.evaluate(() => {
+      const row = [...document.querySelectorAll("[data-rates-form] .row")].find((el) => el.textContent.includes("Privat bil"));
+      const rename = row.querySelector("[data-rename-vehicle]").getBoundingClientRect();
+      const remove = row.querySelector("[data-toggle-vehicle]").getBoundingClientRect();
+      return Math.abs(rename.top - remove.top) < 2;
+    });
+    check(sameLine, "Byt namn och Ta bort hamnar på olika rader i mobilen");
+    await context.close();
+  });
+}
+
+// Låsta månader, nekade veckor och filtret Anställd
+async function lockAndRejectTests(browser) {
+  await test("Granskning: nekad vecka syns för admin, låst månad med ej godkända rader, varning för resten av månaden", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/kom-igang", {}, { loggedIn: true });
+    await seedReview(page);
+    // Har inte loggat in än – ska inte finnas i filtret
+    await page.evaluate(async () => (await import("./js/store.js")).saveUser({ name: "Oskar Väntar", employeeNo: "9", email: "9@exempel.se", role: "employee" }));
+    await page.goto(BASE + "#/granska/2026-09");
+    await page.reload();
+    const users = await page.getByLabel("Anställd").locator("option").allTextContents();
+    check(!users.includes("Oskar Väntar"), "Den som inte har loggat in finns i filtret");
+
+    // Nekad vecka: admin ser märkningen bredvid knapparna
+    const olle = page.locator(".person", { hasText: "Olle Ek" });
+    await olle.getByRole("button", { name: "Neka" }).first().click();
+    await page.locator("dialog[open]").getByLabel("Orsak").fill("Fel vecka");
+    await page.locator("dialog[open]").getByRole("button", { name: "Neka" }).click();
+    await olle.locator(".week", { hasText: "Vecka 39" }).getByText("4 nekade", { exact: true }).waitFor();
+
+    // Låst månad med rader som inte är godkända
+    const maja = page.locator(".person", { hasText: "Maja Medarbetare" });
+    await maja.getByRole("button", { name: "Markera september som klar" }).click();
+    await page.locator("dialog[open]").getByRole("button", { name: "Markera som klar" }).click();
+    await maja.getByText("Månaden är låst, men 4 rader är inte godkända.", { exact: false }).waitFor();
+    await maja.locator(".week", { hasText: "Vecka 39" }).locator(".week__head").getByText("Låst utan godkännande").waitFor();
+    check(!(await maja.getByText("Väntar på granskning").count()), "Låst vecka visas som Väntar på granskning");
+
+    // Månaden är inte slut: varna för att resten av månaden också låses
+    await page.goto(BASE + "#/granska");
+    await page.reload();
+    await page.locator(".person", { hasText: "Maja Medarbetare" }).getByRole("button", { name: /^Markera .* som klar$/ }).click();
+    await page.locator("dialog[open]").getByText("är inte slut", { exact: false }).waitFor();
+    await page.locator("dialog[open]").getByRole("button", { name: "Avbryt" }).click();
+    await context.close();
+  });
+
+  await test("Tidrapport: admin i låst månad länkas till Granskning, nekad orsak syns överst vid rättning", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/kom-igang", {}, { loggedIn: true });
+    await seedReview(page);
+    await page.evaluate(async () => {
+      const s = await import("./js/store.js");
+      const me = await s.getSession();
+      await s.lockMonth(me.id, "2026-09");
+    });
+    await page.goto(BASE + "#/tid/2026-09-24");
+    await page.reload();
+    await page.locator("[data-form-card]").getByRole("link", { name: "Granskning" }).waitFor();
+    check(!(await page.getByText("Be din administratör").count()), "Admin uppmanas be sin administratör");
+
+    await page.evaluate(async () => {
+      const s = await import("./js/store.js");
+      const rows = await s.listEntries({ month: "2026-09" });
+      const maja = (await s.listUsers()).find((u) => u.name === "Maja Medarbetare");
+      await s.rejectEntries([rows.find((e) => e.userId === maja.id && e.date === "2026-09-22").id], "Fel projekt");
+      await s.logout();
+      await s.login("2@exempel.se", "hemligt123");
+    });
+    await page.goto(BASE + "#/tid/2026-09-22");
+    await page.reload();
+    await page.getByRole("button", { name: /^Redigera Brf Almen/ }).click();
+    await page.locator("[data-form-card]").getByText("Fel projekt").waitFor();
+    await context.close();
+  });
+}
+
+async function exportFilterTests(browser) {
+  await test("Export: nekade rader tas inte med som standard, filtren syns i filnamnet, schemat jämförs med all tid", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/kom-igang", { acceptDownloads: true }, { loggedIn: true });
+    await seedReview(page);
+    await page.evaluate(async () => {
+      const s = await import("./js/store.js");
+      const olle = (await s.listUsers()).find((u) => u.name === "Olle Ek");
+      const rows = await s.listEntries({ userId: olle.id, month: "2026-09" });
+      await s.rejectEntries([rows.find((e) => e.date === "2026-09-21").id], "Fel projekt");
+    });
+    await page.goto(BASE + "#/granska/2026-09");
+    await page.reload();
+    const olle = page.locator(".person", { hasText: "Olle Ek" });
+    const summary = await olle.locator(".person__title p").textContent();
+
+    // Hela månaden: den nekade raden följer inte med
+    let [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Tid (CSV)" }).click()]);
+    check(download.suggestedFilename() === "tidla-underlag-2026-09.csv", `Fel filnamn: ${download.suggestedFilename()}`);
+    let csv = await readDownload(download);
+    check(!csv.includes(";Nekad"), "Nekade rader följde med i standardexporten");
+    await page.getByText("1 nekad rad togs inte med", { exact: false }).waitFor();
+
+    // Bara nekade, för Olle: filnamnet visar filtren och schemajämförelsen ändras inte
+    await page.getByLabel("Anställd").selectOption({ label: "Olle Ek" });
+    await page.getByLabel("Status").selectOption({ label: "Nekade" });
+    check((await olle.locator(".person__title p").textContent()) === summary, "Statusfiltret ändrar jämförelsen med schemat");
+    [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Tid (CSV)" }).click()]);
+    check(download.suggestedFilename() === "tidla-underlag-2026-09-olle-ek-nekade.csv", `Fel filnamn: ${download.suggestedFilename()}`);
+    csv = await readDownload(download);
+    check(csv.split("\r\n").filter(Boolean).length === 2 && csv.includes(";Nekad"), "Fel rader i filen med nekade");
     await context.close();
   });
 }
@@ -1221,31 +1525,74 @@ async function settingsTests(browser) {
     await context.close();
   });
 
-  await test("Inställningar: milersättning med påminnelse, fordon döljs i tidrapporten", async () => {
-    const { context, page } = await openWithAdmin(browser, "#/kom-igang", {}, { loggedIn: true });
-    await page.getByText("Fyll i milersättningen").waitFor();
-    await page.goto(BASE + "#/installningar/fordon");
-    await page.reload();
-    await page.getByText("Beloppen har inte kontrollerats.").waitFor();
-    await page.getByRole("button", { name: "Redigera Privat bil" }).click();
-    const dialog = page.locator("dialog[open]");
-    await dialog.getByLabel(/Ersättning per mil/).fill("25");
-    await dialog.getByRole("button", { name: "Spara" }).click();
-    await page.locator(".row", { hasText: "Privat bil" }).getByText("25 kr/mil").waitFor();
-    await page.getByText("Senast kontrollerade:").waitFor();
-    await page.getByRole("button", { name: "Dölj Motorcykel" }).click();
-    await page.locator(".row", { hasText: "Motorcykel" }).getByText("Dold").waitFor();
+  await test("Inställningar: milersättning förifylld, belopp i listan, lägga till och ta bort fordon", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/installningar/fordon", {}, { loggedIn: true });
+    // Nytt företag: bara firmabil och privat bil, med Skatteverkets belopp förifyllt
+    const rows = page.locator("[data-rates-form] .row");
+    check((await rows.count()) === 2, `Fel antal fordon: ${await rows.count()}`);
+    check((await page.getByLabel("Belopp per mil för Privat bil").inputValue()) === "25", "Beloppet för privat bil är inte förifyllt");
+    await page.locator(".row", { hasText: "Privat bil" }).getByText("Skatteverkets belopp för 2026 – ändra om ni har ett annat avtal.").waitFor();
+    await page.locator(".row", { hasText: "Firmabil" }).getByText("Ingen ersättning – körda mil sparas bara som underlag.").waitFor();
+    check(!(await page.getByLabel("Belopp per mil för Firmabil").count()), "Firmabil ska inte ha något belopp");
+    const link = page.getByRole("link", { name: /Belopp och procent 2026/ });
+    check((await link.getAttribute("href")).includes("skatteverket.se/privat/skatter/beloppochprocent/2026"), "Länken går inte till Belopp och procent");
 
-    await page.goto(BASE + "#/kom-igang");
-    await page.locator("h1", { hasText: "Kom igång" }).waitFor();
-    check(!(await page.getByText("Fyll i milersättningen").count()), "Påminnelsen finns kvar efter kontroll");
+    // Eget belopp i listan
+    await page.getByLabel("Belopp per mil för Privat bil").fill("abc");
+    await page.getByRole("button", { name: "Spara belopp" }).click();
+    check((await page.getByLabel("Belopp per mil för Privat bil").getAttribute("aria-invalid")) === "true", "Felaktigt belopp godkändes");
+    await page.getByLabel("Belopp per mil för Privat bil").fill("30");
+    await page.getByRole("button", { name: "Spara belopp" }).click();
+    await page.getByText("Beloppen är sparade").waitFor();
+    await page.locator(".row", { hasText: "Privat bil" }).getByText("Eget belopp. Skatteverkets belopp för 2026: 25 kr.").waitFor();
+
+    // Lägg till ur den färdiga listan – bensin och diesel är en rad
+    await page.getByRole("button", { name: "Lägg till fordon" }).click();
+    const dialog = page.locator("dialog[open]");
+    const ready = await dialog.locator(".quick .row__title").allTextContents();
+    check(ready.join("|") === "Förmånsbil|Förmånsbil – el|Motorcykel", `Fel fordon i listan: ${ready.join(", ")}`);
+    await dialog.getByRole("button", { name: /Förmånsbil – el/ }).click();
+    await page.getByText("Förmånsbil – el är tillagd").waitFor();
+    check((await page.getByLabel("Belopp per mil för Förmånsbil – el").inputValue()) === "9,5", "Elbilens belopp är inte förifyllt");
+
+    // Ta bort (döljs) – kommer tillbaka i den färdiga listan
+    await page.getByRole("button", { name: "Ta bort Förmånsbil – el från listan" }).click();
+    await page.getByText("Förmånsbil – el är borttagen från listan").waitFor();
+    check((await rows.count()) === 2, "Fordonet togs inte bort");
 
     await seedProjects(page);
     await page.goto(BASE + "#/tid/2026-09-24");
     await page.reload();
     await page.locator("[data-toggle=\"trip\"]").click();
     const vehicles = await page.getByLabel("Milersättning").locator("option").allTextContents();
-    check(!vehicles.includes("Motorcykel"), "Dolt fordon visas i tidrapporten");
+    check(vehicles.join("|") === "Inget fordon|Firmabil|Privat bil", `Fel fordon i tidrapporten: ${vehicles.join(", ")}`);
+    await context.close();
+  });
+
+  await test("Milersättning: påminnelse i januari när beloppen gäller förra året", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/kom-igang", {}, { loggedIn: true });
+    // Låtsas att beloppen gäller förra året
+    await page.evaluate(async () => {
+      const key = "tidla:settings";
+      const settings = JSON.parse(localStorage.getItem(key));
+      const year = Number(new Date().getFullYear()) - 1;
+      settings.vehicleTypes = settings.vehicleTypes.map((v) => (v.ratePerMil === null ? v : { ...v, rateYear: year, rateCustom: true }));
+      localStorage.setItem(key, JSON.stringify(settings));
+    });
+    const year = new Date().getFullYear();
+    await page.reload();
+    await page.getByText(`Milersättningen gäller ${year - 1} – kontrollera för ${year}`).first().waitFor();
+    await page.goto(BASE + "#/granska");
+    await page.reload();
+    await page.getByText(`Milersättningen gäller ${year - 1} – kontrollera för ${year}.`).waitFor();
+    await page.goto(BASE + "#/installningar/fordon");
+    await page.reload();
+    await page.getByRole("button", { name: "Jag har kontrollerat beloppen" }).click();
+    await page.getByText("Beloppen är markerade som kontrollerade").waitFor();
+    await page.getByText(`Beloppen gäller ${year}.`, { exact: false }).waitFor();
+    await page.goto(BASE + "#/kom-igang");
+    await page.reload();
+    check(!(await page.getByText("kontrollera för").count()), "Påminnelsen finns kvar efter kontroll");
     await context.close();
   });
 
@@ -1288,15 +1635,54 @@ async function settingsTests(browser) {
     });
     await page.goto(BASE + "#/installningar/gallring");
     await page.reload();
-    await page.getByRole("button", { name: "Radera 1 registrering" }).click();
+    await page.getByRole("button", { name: "Radera 1 rad" }).click();
     await page.locator("dialog[open]").getByRole("button", { name: "Fortsätt" }).click();
     const second = page.locator("dialog[open]");
     await second.getByText("Det här går inte att ångra.").waitFor();
     await second.getByRole("textbox").fill("RADERA");
     await second.getByRole("button", { name: "Radera" }).click();
-    await page.getByText("1 registrering raderade").waitFor();
+    await page.getByText("1 registrering raderad", { exact: true }).waitFor();
     const left = await page.evaluate(async () => (await (await import("./js/store.js")).listEntries()).map((e) => e.date));
     check(left.join() === "2026-09-24", `Fel rader kvar: ${left.join()}`);
+    await context.close();
+  });
+
+  await test("Inställningar: utan projekt rapporteras tiden på kunden", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/installningar/projekt", {}, { loggedIn: true });
+    await seedProjects(page);
+    await page.reload();
+    const box = page.getByLabel("Använd projekt");
+    check(await box.isChecked(), "Projekt ska användas som standard");
+    await box.uncheck();
+    await page.getByRole("button", { name: "Spara projekt" }).click();
+    await page.getByText("Projekt används inte – tiden rapporteras på kunder").waitFor();
+    await page.locator('.nav__link[href="#/projekt"]', { hasText: "Kunder" }).waitFor();
+
+    // Kundsidan: inga projekt-flikar och ingen Nytt projekt-knapp
+    await page.goto(BASE + "#/projekt");
+    await page.reload();
+    await page.locator("h1", { hasText: "Kunder" }).waitFor();
+    check(!(await page.getByRole("button", { name: "Nytt projekt" }).count()), "Nytt projekt visas fast projekt är av");
+    await page.locator(".row", { hasText: "Villa Holm" }).waitFor();
+
+    // Tidrapporten: bara kund, inget projektfält
+    await page.goto(BASE + `#/tid/${DAY}`);
+    await page.reload();
+    await page.locator("h1", { hasText: "Lägg till tid" }).waitFor();
+    check(!(await page.locator("#time-project").count()), "Projektfältet visas fast projekt är av");
+    await page.getByRole("button", { name: "Spara registrering" }).click();
+    check((await page.locator("#time-customer").getAttribute("aria-invalid")) === "true", "Saknad kund markerades inte");
+    await page.locator("#time-customer").selectOption({ label: "Villa Holm" });
+    await page.getByRole("button", { name: "Spara registrering" }).click();
+    await page.getByText("Registreringen är sparad").waitFor();
+    await page.locator(".row", { hasText: "Villa Holm" }).getByText("Väntar på granskning").waitFor();
+
+    // Granskning summerar per kund
+    await page.goto(BASE + "#/granska/2026-09");
+    await page.reload();
+    await page.locator("#rv-projects", { hasText: "Per kund" }).waitFor();
+    await page.locator("[data-projects] th", { hasText: "Villa Holm" }).waitFor();
+    check(!(await page.locator("#rv-project").count()), "Projektfiltret visas fast projekt är av");
     await context.close();
   });
 }
@@ -1318,6 +1704,15 @@ async function acceptanceTests(browser) {
     await page.locator("#setup-password").fill("hemligt123");
     await page.getByRole("button", { name: "Skapa konto" }).click();
     await page.waitForFunction(() => location.hash === "#/kom-igang");
+
+    // Företag via Kom igång – steg 1 är inte klart förrän uppgifterna har sparats
+    await page.getByText("0 av 4 klart").waitFor();
+    await page.getByRole("link", { name: "Fyll i" }).click();
+    await page.getByLabel("Organisationsnummer").fill("556677-8899");
+    await page.getByRole("button", { name: "Spara företag" }).click();
+    await page.getByText("Företaget är sparat").waitFor();
+    await page.locator('.nav__link[href="#/kom-igang"]').click();
+    await page.getByText("1 av 4 klart").waitFor();
 
     // Kund och projekt via Kom igång
     await page.getByRole("link", { name: "Lägg till kund" }).click();
@@ -1369,7 +1764,7 @@ async function acceptanceTests(browser) {
     await page.locator('.nav__link[href="#/granska"]').click();
     const maja = page.locator(".person", { hasText: "Maja Medarbetare" });
     await maja.getByRole("button", { name: "Godkänn vecka" }).click();
-    await page.getByText("1 rad godkända").waitFor();
+    await page.getByText("1 rad godkänd", { exact: true }).waitFor();
     await page.getByLabel("Bara godkända").check();
     const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Tid (CSV)" }).click()]);
     const csv = await readDownload(download);
@@ -1415,49 +1810,39 @@ async function acceptanceTests(browser) {
   });
 }
 
-// Testversionen: exempelföretag på Skapa konto och Logga in, raden "Testversion" och Byt företag
+// Testversionen: växeln Logga in / Skapa konto, raden "Testversion" och Byt företag
 async function demoTests(browser) {
-  await test("Testversion: öppna exempelföretag som medarbetare, byta företag, öppna som admin", async () => {
-    const { context, page } = await open(browser, "#/signup");
+  await test("Testversion: växla mellan Logga in och Skapa konto", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/login");
+    const nav = page.getByRole("navigation", { name: "Logga in eller skapa konto" });
+    check((await nav.getByRole("link", { name: "Logga in" }).getAttribute("aria-current")) === "page", "Logga in var inte vald");
+    await nav.getByRole("link", { name: "Skapa konto" }).click();
     await page.locator("h1", { hasText: "Skapa konto" }).waitFor();
-    await page.getByRole("button", { name: "Öppna som medarbetare – Snickeri Exempel AB" }).click();
-    await page.waitForFunction(() => location.hash.startsWith("#/tid"));
-    await page.getByText("Välkommen till Snickeri Exempel AB! Du är inloggad som Erik Lind.").waitFor();
-    await page.getByText("1 nekad registrering att rätta").waitFor();
-    await page.getByText("Testversion – sparas bara i den här webbläsaren.").waitFor();
+    check((await page.evaluate(() => location.hash)) === "#/signup", "Skapa konto öppnades inte fast det finns ett företag");
 
-    // Byt företag raderar allt och går tillbaka till Skapa konto
+    // Ett nytt konto ersätter företaget som finns – efter en fråga
+    await page.getByLabel("Företagsnamn").fill("Nya företaget AB");
+    await page.getByLabel("Ditt namn").fill("Nina Ny");
+    await page.getByLabel("E-post").fill("nina@exempel.se");
+    await page.locator("#setup-password").fill("hemligt123");
+    await page.getByRole("button", { name: "Skapa konto" }).click();
+    const dialog = page.locator("dialog[open]");
+    await dialog.getByRole("button", { name: "Avbryt" }).click();
+    check((await page.evaluate(() => location.hash)) === "#/signup", "Bytte sida fast man avbröt");
+    await page.getByRole("button", { name: "Skapa konto" }).click();
+    await dialog.getByRole("button", { name: "Radera och skapa konto" }).click();
+    await page.waitForFunction(() => location.hash === "#/kom-igang");
+    await page.locator(".sidebar__company", { hasText: "Nya företaget AB" }).waitFor();
+    await context.close();
+  });
+
+  await test("Testversion: Byt företag raderar allt och går till Skapa konto", async () => {
+    const { context, page } = await openWithAdmin(browser, "#/tid", {}, { loggedIn: true });
+    await page.getByText("Testversion – sparas bara i den här webbläsaren.").waitFor();
     await page.getByRole("button", { name: "Byt företag" }).click();
     await page.locator("dialog[open]").getByRole("button", { name: "Radera och byt" }).click();
     await page.waitForFunction(() => location.hash === "#/signup");
     check((await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("tidla:") && k !== "tidla:theme").length)) === 0, "Data finns kvar");
-
-    await page.getByRole("button", { name: "Öppna som admin – Städ Exempel AB" }).click();
-    await page.waitForFunction(() => location.hash.startsWith("#/granska"));
-    await page.locator(".sidebar__company", { hasText: "Städ Exempel AB" }).waitFor();
-    await page.locator(".person", { hasText: "Ahmed Yusuf" }).waitFor();
-    await context.close();
-  });
-
-  await test("Testversion: från Logga in frågar den innan det egna företaget ersätts", async () => {
-    const { context, page } = await openWithAdmin(browser, "#/login");
-    await page.getByRole("button", { name: "Öppna som admin – Salong Exempel" }).click();
-    const dialog = page.locator("dialog[open]");
-    await dialog.getByText("Det som finns i Tidla i den här webbläsaren ersätts").waitFor();
-    await dialog.getByRole("button", { name: "Avbryt" }).click();
-    check((await page.evaluate(() => location.hash)) === "#/login", "Bytte sida fast man avbröt");
-    await page.getByRole("button", { name: "Öppna som admin – Salong Exempel" }).click();
-    await dialog.getByRole("button", { name: "Öppna exempelföretaget" }).click();
-    await page.waitForFunction(() => location.hash.startsWith("#/granska"));
-    // Inloggningarna visas i rutan – logga ut och in som en annan medarbetare
-    await page.getByRole("button", { name: "Logga ut" }).first().click();
-    await page.getByText("Alla inloggningar").nth(1).click();
-    await page.getByText("nils@salong.example").waitFor();
-    await page.getByLabel("E-post").fill("nils@salong.example");
-    await page.locator("#login-password").fill("demo1234");
-    await page.getByRole("button", { name: "Logga in", exact: true }).click();
-    await page.waitForFunction(() => location.hash.startsWith("#/tid"));
-    await page.locator(".sidebar__user-name", { hasText: "Nils Åberg" }).waitFor();
     await context.close();
   });
 }
@@ -1731,6 +2116,10 @@ try {
     await timeTests(browser);
     await materialTests(browser);
     await reviewTests(browser);
+    await laterFixTests(browser);
+    await dialogAndVehicleTests(browser);
+    await lockAndRejectTests(browser);
+    await exportFilterTests(browser);
     await settingsTests(browser);
     await acceptanceTests(browser);
     await demoTests(browser);

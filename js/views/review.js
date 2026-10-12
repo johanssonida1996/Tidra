@@ -7,21 +7,24 @@ import { html, setHTML, raw } from "../lib/html.js";
 import { icon } from "../lib/icons.js";
 import {
   today, currentMonth, addMonths, monthRange, datesInRange, isoWeek, weekdayKey, formatShort, formatMonthCapital,
-  formatMonth, isValidMonth,
+  formatMonth, isValidMonth, toISODate, addDays, startOfWeek,
 } from "../lib/dates.js";
 import { formatHoursUnit, formatHoursDiff, formatInteger, plural } from "../lib/format.js";
 import {
   field, select, textarea, statusPill, pill, avatar, emptyState, callout, openDialog, confirmDialog, notify,
 } from "../lib/ui.js";
 import { downloadFile } from "../lib/csv.js";
-import { buildTimeCsv, buildMaterialCsv } from "../lib/export.js";
+import { buildTimeCsv, buildMaterialCsv, filenamePart } from "../lib/export.js";
 import { isAdmin } from "../auth.js";
 import { ALL } from "../routes.js";
 import { allowed } from "./guard.js";
+import { placeOf, placeLabel, projectsOn } from "../lib/place.js";
+import { ratesNeedCheck } from "../lib/reminders.js";
+import { weekOn } from "../lib/schedule.js";
 
 const STATUS_FILTERS = [
   { value: "", label: "Alla" },
-  { value: "draft", label: "Utkast (att granska)" },
+  { value: "draft", label: "Väntar på granskning" },
   { value: "approved", label: "Godkända" },
   { value: "rejected", label: "Nekade" },
 ];
@@ -33,6 +36,10 @@ export async function render(container, ctx) {
   const settings = ctx.settings;
   const travel = settings.travel ?? {};
   const materialsOn = Boolean(settings.materials?.enabled);
+  // Påminnelse i januari: beloppen per mil gäller förra året
+  const rates = ratesNeedCheck(settings);
+  // Av: tiden rapporteras på kunder – summeringen blir per kund och projektfiltret försvinner
+  const withProjects = projectsOn(settings);
 
   const state = {
     month: isValidMonth(ctx.params[0]) ? ctx.params[0] : currentMonth(),
@@ -63,6 +70,8 @@ export async function render(container, ctx) {
   const projectById = (id) => state.projects.find((p) => p.id === id);
   const customerById = (id) => state.customers.find((c) => c.id === id);
   const userById = (id) => state.users.find((u) => u.id === id);
+  // Kunden för en rad – via projektet, eller direkt när raden saknar projekt
+  const customerIdOf = (row) => placeOf(row, projectById, customerById).customer?.id ?? (row.projectId ? null : row.customerId);
   const category = (e) => typeById(e.timeTypeId)?.category ?? "work";
   // Tid mot schemat: arbete och frånvaro (+ restid om admin valt det). Övertid räknas för sig.
   const scheduleHours = (e) => (category(e) === "overtime" ? 0 : e.hours) + (travel.countsTowardSchedule ? e.travelHours || 0 : 0);
@@ -97,11 +106,10 @@ export async function render(container, ctx) {
   // Filtrerade rader (allt utom status för exporten styrs också av filtren)
   function filtered({ ignoreStatus = false } = {}) {
     const weekDates = state.week ? monthWeeks().find((w) => String(w.week) === state.week)?.dates ?? [] : null;
-    const customerProjects = state.customerId ? new Set(state.projects.filter((p) => p.customerId === state.customerId).map((p) => p.id)) : null;
     return state.entries.filter((e) => {
       if (weekDates && !weekDates.includes(e.date)) return false;
       if (state.userId && e.userId !== state.userId) return false;
-      if (customerProjects && !customerProjects.has(e.projectId)) return false;
+      if (state.customerId && customerIdOf(e) !== state.customerId) return false;
       if (state.projectId && e.projectId !== state.projectId) return false;
       if (!ignoreStatus && state.status && e.status !== state.status) return false;
       return true;
@@ -126,6 +134,13 @@ export async function render(container, ctx) {
         </div>
         <div class="monthnav" data-monthnav></div>
       </div>
+      ${admin && rates.due
+        ? callout(
+            html`<strong>Milersättningen gäller ${rates.validYear ?? "ett tidigare år"} – kontrollera för ${rates.year}.</strong>
+              Skatteverket ändrar beloppen vid årsskiftet. <a href="#/installningar/fordon">Kontrollera beloppen</a>`,
+            { variant: "pink", iconName: "car" },
+          )
+        : ""}
       ${admin ? html`<div class="toolbar toolbar--even" data-filters></div>` : ""}
       <div class="stats stats--four" data-stats></div>
       ${admin ? html`<section class="card stack" aria-labelledby="rv-export" data-export></section>` : ""}
@@ -162,7 +177,9 @@ export async function render(container, ctx) {
         ${field({
           id: "rv-user",
           label: "Anställd",
-          control: select({ id: "rv-user", name: "userId", value: state.userId, placeholder: "Alla anställda", options: state.users.map((u) => ({ value: u.id, label: u.name })) }),
+          control: select({ id: "rv-user", name: "userId", value: state.userId, placeholder: "Alla anställda", options: state.users
+            .filter((u) => u.status === "active" || u.id === state.userId || state.entries.some((e) => e.userId === u.id))
+            .map((u) => ({ value: u.id, label: u.name })) }),
         })}
         ${field({
           id: "rv-week",
@@ -174,11 +191,13 @@ export async function render(container, ctx) {
           label: "Kund",
           control: select({ id: "rv-customer", name: "customerId", value: state.customerId, placeholder: "Alla kunder", options: state.customers.map((c) => ({ value: c.id, label: c.name })) }),
         })}
-        ${field({
-          id: "rv-project",
-          label: "Projekt",
-          control: select({ id: "rv-project", name: "projectId", value: state.projectId, placeholder: "Alla projekt", options: customerProjects.map((p) => ({ value: p.id, label: `${p.projectNo} · ${p.name}` })) }),
-        })}
+        ${withProjects
+          ? field({
+              id: "rv-project",
+              label: "Projekt",
+              control: select({ id: "rv-project", name: "projectId", value: state.projectId, placeholder: "Alla projekt", options: customerProjects.map((p) => ({ value: p.id, label: `${p.projectNo} · ${p.name}` })) }),
+            })
+          : ""}
         ${field({
           id: "rv-status",
           label: "Status",
@@ -216,12 +235,15 @@ export async function render(container, ctx) {
     setHTML(
       $("[data-export]"),
       html`
-        <div class="split split--center split--stack">
+        <div class="split split--center split--stack export-bar">
           <div class="stack stack--s">
             <h2 class="card__title" id="rv-export">Exportera underlag</h2>
-            <p class="text-muted text-small">Följer filtren ovan. Filen öppnas i Excel.</p>
+            <p class="text-muted text-small">
+              Följer filtren ovan, och filnamnet visar vilka filter som gällde. Filen öppnas i Excel.
+              Nekade rader tas inte med – välj status Nekade om du vill exportera dem.
+            </p>
           </div>
-          <div class="cluster">
+          <div class="cluster export-actions">
             <label class="check"><input type="checkbox" data-only-approved ${state.onlyApproved ? raw("checked") : ""} /> Bara godkända</label>
             <button type="button" class="btn btn--primary" data-export-time>${icon("download")}Tid (CSV)</button>
             ${materialsOn
@@ -235,18 +257,43 @@ export async function render(container, ctx) {
 
   /* ---------- Per anställd ---------- */
 
-  // Programmerad tid – bara dagar till och med idag, så att kommande dagar inte blir underskott
+  // Tid enligt schema som borde vara inlagd:
+  // - dagar före idag – idag bara om något redan är registrerat (annars blir dagen ett underskott direkt på morgonen)
+  // - från den dag den anställde började (kontot aktiverades, eller första registreringen om den är tidigare)
+  // - med schemat som gällde varje dag (ett nytt eget schema ändrar inte äldre veckor)
   function scheduleFor(user, dates) {
-    const week = user?.schedule ?? settings.workWeek;
     const now = today();
-    return dates.filter((date) => date <= now).reduce((total, date) => total + (week[weekdayKey(date)] ?? 0), 0);
+    const own = state.entries.filter((e) => e.userId === user.id);
+    const reportedToday = own.some((e) => e.date === now);
+    const firstEntry = own.reduce((min, e) => (!min || e.date < min ? e.date : min), null);
+    const activated = user.activatedAt ? toISODate(new Date(user.activatedAt)) : null;
+    const start = [activated, firstEntry].filter(Boolean).sort()[0] ?? now;
+    return dates
+      .filter((date) => date >= start && (date < now || (date === now && reportedToday)))
+      .reduce((total, date) => total + (weekOn(user, date, settings.workWeek)[weekdayKey(date)] ?? 0), 0);
+  }
+
+  // Registrerat som jämförs med schemat: bara till och med idag – inlagd frånvaro framåt (t.ex. semester) är ingen plustid
+  const untilToday = (rows) => rows.filter((e) => e.date <= today());
+  // Nekade rader ska rättas – de räknas inte som rapporterad tid utan visas för sig ("8,0 h nekat")
+  const counted = (rows) => untilToday(rows).filter((e) => e.status !== "rejected");
+  const rejectedHours = (rows) => sum(rows.filter((e) => e.status === "rejected"), (e) => e.hours + (e.travelHours || 0));
+
+  // Avvikelsen blir röd först när perioden är slut – innan dess är ett underskott oftast bara tid som inte är inlagd än
+  const diffClass = (diff, periodEnd) => (Math.abs(diff) > 0.001 && periodEnd < today() ? "deviation" : "text-muted");
+
+  // Status för en vecka: nekade rader först, sedan om allt är godkänt, annars väntar den på granskning
+  // I en låst månad väntar inget längre på granskning – raderna låstes utan att godkännas
+  function weekStatus(rows, locked = false) {
+    const rejected = rows.filter((e) => e.status === "rejected").length;
+    if (rejected) return pill(plural(rejected, "nekad", "nekade"), "rejected", "alert");
+    if (rows.every((e) => e.status === "approved")) return statusPill("approved");
+    return locked ? pill("Låst utan godkännande", "draft", "lock") : statusPill("draft");
   }
 
   function entryRow(e, locked) {
     const type = typeById(e.timeTypeId);
-    const project = projectById(e.projectId);
-    const customer = customerById(project?.customerId);
-    const title = type?.category === "absence" ? type.name : `${customer?.name ?? "Okänd kund"} · ${project ? `${project.projectNo} ${project.name}` : "Okänt projekt"}`;
+    const title = type?.category === "absence" || type?.placeless ? type.name : placeLabel(e, projectById, customerById);
     const meta = [
       formatShort(e.date),
       type && type.category !== "absence" && type.category !== "work" ? type.name : "",
@@ -255,23 +302,28 @@ export async function render(container, ctx) {
       e.comment,
     ].filter(Boolean).join(" · ");
     const canReview = admin && !locked;
-    return html`<li class="row row--wrap">
+    // Kompakt rad (ingen ikon): i mobilen hamnar timmar och knappar på samma rad under texten
+    return html`<li class="row row--wrap row--compact">
       <span class="row__body">
         <span class="row__title">${title}</span>
         <span class="row__meta">${meta}</span>
         ${e.status === "rejected" && e.rejectReason ? html`<span class="row__note">Nekad: ${e.rejectReason}</span>` : ""}
       </span>
       <span class="row__aside">
-        ${statusPill(e.status)}
+        ${locked && e.status === "draft"
+          ? pill("Låst utan godkännande", "draft", "lock")
+          : canReview && e.status === "draft"
+            ? "" // Knapparna visar redan att raden väntar på granskning
+            : statusPill(e.status)}
         <span class="row__value">${formatHoursUnit(e.hours + (e.travelHours || 0))}</span>
       </span>
       ${canReview
-        ? html`<span class="row__tools">
+        ? html`<span class="row__actions row__actions--end">
             ${e.status !== "approved"
-              ? html`<button type="button" class="icon-btn icon-btn--ghost" data-approve="${e.id}" title="Godkänn" aria-label="Godkänn ${title} ${formatShort(e.date)}">${icon("check", 18)}</button>`
+              ? html`<button type="button" class="btn btn--secondary btn--sm" data-approve="${e.id}" aria-label="Godkänn ${title} ${formatShort(e.date)}">${icon("check", 16)}Godkänn</button>`
               : ""}
             ${e.status !== "rejected"
-              ? html`<button type="button" class="icon-btn icon-btn--ghost icon-btn--danger" data-reject="${e.id}" title="Neka" aria-label="Neka ${title} ${formatShort(e.date)}">${icon("close", 18)}</button>`
+              ? html`<button type="button" class="btn btn--text btn--text-danger btn--sm" data-reject="${e.id}" aria-label="Neka ${title} ${formatShort(e.date)}">${icon("close", 16)}Neka</button>`
               : ""}
           </span>`
         : ""}
@@ -296,9 +348,12 @@ export async function render(container, ctx) {
         const own = rows.filter((e) => e.userId === user.id);
         const locked = isLocked(user.id);
         const monthDates = weeks.flatMap((w) => w.dates);
+        // All tid i perioden, oavsett filter på status, kund och projekt – annars blir jämförelsen med schemat fel
+        const period = state.entries.filter((e) => e.userId === user.id && monthDates.includes(e.date));
         const planned = scheduleFor(user, monthDates);
-        const reported = sum(own, scheduleHours);
-        const overtime = sum(own.filter((e) => category(e) === "overtime"), (e) => e.hours);
+        const reported = sum(counted(period), scheduleHours);
+        const rejected = rejectedHours(period);
+        const overtime = sum(period.filter((e) => category(e) === "overtime"), (e) => e.hours);
         const pending = state.entries.filter((e) => e.userId === user.id && e.status !== "approved").length;
         return html`<section class="card stack person" aria-labelledby="rv-person-${user.id}">
           <div class="person__head">
@@ -307,8 +362,9 @@ export async function render(container, ctx) {
               <h2 class="card__title" id="rv-person-${user.id}">${user.name}</h2>
               <p class="text-muted text-small">
                 ${formatHoursUnit(reported)} av ${formatHoursUnit(planned)}
-                <span class="${Math.abs(reported - planned) > 0.001 ? "deviation" : ""}">(${formatHoursDiff(reported - planned)})</span>
+                <span class="${diffClass(reported - planned, monthRange(state.month).to)}">(${formatHoursDiff(reported - planned)})</span>
                 ${overtime ? ` · ${formatHoursUnit(overtime)} övertid` : ""}
+                ${rejected ? html` · <span class="text-error">${formatHoursUnit(rejected)} nekat</span>` : ""}
               </p>
             </div>
             <div class="person__actions">
@@ -321,7 +377,14 @@ export async function render(container, ctx) {
             </div>
           </div>
           ${locked
-            ? callout(admin ? "Månaden är låst. Inga ändringar kan göras förrän du låser upp den." : "Månaden är markerad som klar och låst.", { variant: "pink", iconName: "lock" })
+            ? callout(
+                admin
+                  ? pending
+                    ? `Månaden är låst, men ${plural(pending, "rad är inte godkänd", "rader är inte godkända")}. Lås upp om du vill granska dem.`
+                    : "Månaden är låst. Inga ändringar kan göras förrän du låser upp den."
+                  : "Månaden är markerad som klar och låst.",
+                { variant: "pink", iconName: "lock" },
+              )
             : ""}
           ${own.length
             ? ""
@@ -329,9 +392,12 @@ export async function render(container, ctx) {
           <ul class="list" ${own.length ? "" : raw("hidden")}>
             ${weeks.map((w) => {
               const weekRows = own.filter((e) => w.dates.includes(e.date));
+              const weekAll = period.filter((e) => w.dates.includes(e.date));
               const weekPlanned = scheduleFor(user, w.dates);
-              const weekReported = sum(weekRows, scheduleHours);
-              const weekOvertime = sum(weekRows.filter((e) => category(e) === "overtime"), (e) => e.hours);
+              const weekReported = sum(counted(weekAll), scheduleHours);
+              const weekRejected = rejectedHours(weekAll);
+              const weekAhead = sum(weekAll.filter((e) => e.date > today()), (e) => e.hours);
+              const weekOvertime = sum(weekAll.filter((e) => category(e) === "overtime"), (e) => e.hours);
               const drafts = weekRows.filter((e) => e.status !== "approved");
               const key = `${user.id}|${w.week}`;
               const open = state.open.has(key);
@@ -345,20 +411,23 @@ export async function render(container, ctx) {
                     <span class="week__dates text-muted text-small">${formatShort(w.dates[0])}–${formatShort(w.dates[w.dates.length - 1])}</span>
                     <span class="week__sum num">
                       ${upcoming && !weekReported
-                        ? html`<span class="text-muted">Kommande</span>`
+                        ? html`<span class="text-muted">Kommande${weekAhead ? ` · ${formatHoursUnit(weekAhead)} inlagt` : ""}</span>`
                         : html`${formatHoursUnit(weekReported)} <span class="text-muted">av ${formatHoursUnit(weekPlanned)}</span>
-                          <span class="${Math.abs(diff) > 0.001 ? "deviation" : "text-muted"}">${formatHoursDiff(diff)}</span>`}
+                          <span class="${diffClass(diff, addDays(startOfWeek(w.dates[0]), 6))}">${formatHoursDiff(diff)}</span>`}
                       ${weekOvertime ? html`<span class="text-muted">· ${formatHoursUnit(weekOvertime)} övertid</span>` : ""}
+                      ${weekRejected ? html`<span class="text-error">· ${formatHoursUnit(weekRejected)} nekat</span>` : ""}
+                      ${weekAhead && !(upcoming && !weekReported) ? html`<span class="text-muted">· ${formatHoursUnit(weekAhead)} inlagt framåt</span>` : ""}
                     </span>
                     ${weekRows.length ? html`<span class="trip__chevron">${icon("chevronDown", 18)}</span>` : ""}
                   </button>
                   ${admin && !locked && drafts.length
                     ? html`<span class="week__actions">
+                        ${weekRows.some((e) => e.status === "rejected") ? weekStatus(weekRows) : ""}
                         <button type="button" class="btn btn--secondary btn--sm" data-approve-week="${key}">${icon("check", 16)}Godkänn vecka</button>
                         <button type="button" class="btn btn--text btn--text-danger btn--sm" data-reject-week="${key}">Neka</button>
                       </span>`
-                    : weekRows.length && !drafts.length
-                      ? statusPill("approved")
+                    : weekRows.length
+                      ? weekStatus(weekRows, locked)
                       : ""}
                 </div>
                 <div class="week__rows" id="rv-week-${key.replace("|", "-")}" ${open ? "" : raw("hidden")}>
@@ -377,16 +446,19 @@ export async function render(container, ctx) {
   function renderSummaries() {
     if (!admin) return;
     const rows = filtered();
+    // Per projekt – eller per kund när projekt inte används (äldre projektrader räknas till sin kund)
+    const groupOf = (e) => (withProjects && e.projectId ? `p:${e.projectId}` : `c:${customerIdOf(e)}`);
     const byProject = new Map();
-    for (const e of rows.filter((x) => x.projectId)) {
-      const item = byProject.get(e.projectId) ?? { hours: 0, overtime: 0, travelBilled: 0, travelFree: 0, count: 0, km: 0 };
+    for (const e of rows.filter((x) => x.projectId || x.customerId)) {
+      const key = groupOf(e);
+      const item = byProject.get(key) ?? { hours: 0, overtime: 0, travelBilled: 0, travelFree: 0, count: 0, km: 0 };
       if (category(e) === "overtime") item.overtime += e.hours;
       else item.hours += e.hours;
       if (e.travelBillable) item.travelBilled += e.travelHours || 0;
       else item.travelFree += e.travelHours || 0;
       item.count += 1;
       item.km += Number(e.km) || 0;
-      byProject.set(e.projectId, item);
+      byProject.set(key, item);
     }
     const byAbsence = new Map();
     for (const e of rows.filter((x) => category(x) === "absence")) {
@@ -396,11 +468,11 @@ export async function render(container, ctx) {
     setHTML(
       $("[data-projects]"),
       html`
-        <h2 class="card__title" id="rv-projects">Per projekt</h2>
+        <h2 class="card__title" id="rv-projects">${withProjects ? "Per projekt" : "Per kund"}</h2>
         ${byProject.size
           ? html`<div class="table-wrap"><table class="table">
               <thead><tr>
-                <th scope="col">Projekt</th>
+                <th scope="col">${withProjects ? "Projekt" : "Kund"}</th>
                 <th scope="col" class="num">Arbete</th>
                 <th scope="col" class="num">Övertid</th>
                 <th scope="col" class="num">Restid deb.</th>
@@ -409,11 +481,13 @@ export async function render(container, ctx) {
                 <th scope="col" class="num">Rader</th>
               </tr></thead>
               <tbody>
-                ${[...byProject.entries()].map(([id, s]) => {
-                  const p = projectById(id);
-                  const c = customerById(p?.customerId);
+                ${[...byProject.entries()].map(([key, s]) => {
+                  const id = key.slice(2);
+                  const p = key.startsWith("p:") ? projectById(id) : null;
+                  const c = customerById(p ? p.customerId : id);
+                  const title = key.startsWith("p:") ? (p ? `${p.projectNo} ${p.name}` : "Okänt projekt") : c?.name ?? "Okänd kund";
                   return html`<tr>
-                    <th scope="row"><span class="table__title">${p ? `${p.projectNo} ${p.name}` : "Okänt projekt"}</span><span class="text-muted text-small">${c?.name ?? ""}</span></th>
+                    <th scope="row"><span class="table__title">${title}</span>${p ? html`<span class="text-muted text-small">${c?.name ?? ""}</span>` : ""}</th>
                     <td class="num">${formatHoursUnit(s.hours)}</td>
                     <td class="num">${formatHoursUnit(s.overtime)}</td>
                     <td class="num">${formatHoursUnit(s.travelBilled)}</td>
@@ -424,7 +498,7 @@ export async function render(container, ctx) {
                 })}
               </tbody>
             </table></div>`
-          : html`<p class="text-muted text-small">Ingen projekttid.</p>`}
+          : html`<p class="text-muted text-small">${withProjects ? "Ingen projekttid." : "Ingen tid på kunder."}</p>`}
       `,
     );
     setHTML(
@@ -469,7 +543,7 @@ export async function render(container, ctx) {
         id: "rv-reason",
         label: "Orsak",
         help: "Medarbetaren ser orsaken och kan rätta raden.",
-        control: textarea({ id: "rv-reason", name: "reason", rows: 2, maxlength: 200, help: true, placeholder: "T.ex. fel projekt" }),
+        control: textarea({ id: "rv-reason", name: "reason", rows: 2, maxlength: 200, help: true, placeholder: withProjects ? "T.ex. fel projekt" : "T.ex. fel kund" }),
       }),
       actions: html`<button type="button" class="btn btn--secondary" data-close>Avbryt</button>
         <button type="submit" class="btn btn--danger">Neka</button>`,
@@ -489,30 +563,51 @@ export async function render(container, ctx) {
     return filtered({ ignoreStatus: true }).filter((e) => e.userId === userId && dates.includes(e.date) && e.status !== "approved").map((e) => e.id);
   };
 
+  // Filtren i filnamnet: tidla-underlag-2026-10-v41-erik-lind-godkanda.csv
+  const STATUS_NAMES = { draft: "vantar", approved: "godkanda", rejected: "nekade" };
+  function exportSuffix({ withStatus = true } = {}) {
+    const parts = [
+      state.week && `v${state.week}`,
+      state.userId && userById(state.userId)?.name,
+      state.customerId && customerById(state.customerId)?.name,
+      state.projectId && projectById(state.projectId)?.projectNo,
+      withStatus && (state.onlyApproved ? "godkanda" : STATUS_NAMES[state.status]),
+    ];
+    // Filter som inte används blir false/undefined/"" – de hoppas över före omvandlingen till text
+    return parts.filter(Boolean).map(filenamePart).filter(Boolean).map((part) => `-${part}`).join("");
+  }
+
   function exportTime() {
-    const rows = filtered().filter((e) => !state.onlyApproved || e.status === "approved");
-    if (!rows.length) return notify("Det finns inga rader att exportera med de här filtren.", { type: "error" });
+    const matching = filtered().filter((e) => !state.onlyApproved || e.status === "approved");
+    // Nekade rader följer bara med när man filtrerar på dem – annars kan de faktureras av misstag
+    const rows = matching.filter((e) => state.status === "rejected" || e.status !== "rejected");
+    const skipped = matching.length - rows.length;
+    if (!rows.length) {
+      return notify(skipped ? "Alla rader är nekade. Välj status Nekade om du vill exportera dem." : "Det finns inga rader att exportera med de här filtren.", { type: "error" });
+    }
     const { filename, content } = buildTimeCsv({
       entries: rows, users: state.users, projects: state.projects, customers: state.customers, settings,
-      month: state.month, suffix: state.week ? `-v${state.week}` : "",
+      month: state.month, suffix: exportSuffix(),
     });
     downloadFile(filename, content);
-    notify(`${filename} är nedladdad (${plural(rows.length, "rad", "rader")})`);
+    notify(`${filename} är nedladdad (${plural(rows.length, "rad", "rader")}${skipped ? `, ${plural(skipped, "nekad rad", "nekade rader")} togs inte med` : ""})`);
   }
 
   function exportMaterial() {
-    const customerProjects = state.customerId ? new Set(state.projects.filter((p) => p.customerId === state.customerId).map((p) => p.id)) : null;
+    const weekDates = state.week ? monthWeeks().find((w) => String(w.week) === state.week)?.dates ?? [] : null;
     const rows = state.materials.filter((m) =>
+      (!weekDates || weekDates.includes(m.date)) &&
       (!state.userId || m.userId === state.userId) &&
       (!state.projectId || m.projectId === state.projectId) &&
-      (!customerProjects || customerProjects.has(m.projectId)),
+      (!state.customerId || customerIdOf(m) === state.customerId),
     );
-    if (!rows.length) return notify("Det finns inga uttag att exportera med de här filtren.", { type: "error" });
+    if (!rows.length) return notify("Det finns inget material från lagret att exportera med de här filtren.", { type: "error" });
     const { filename, content } = buildMaterialCsv({
       materials: rows, users: state.users, projects: state.projects, customers: state.customers, articles: state.articles, month: state.month,
+      suffix: exportSuffix({ withStatus: false }),
     });
     downloadFile(filename, content);
-    notify(`${filename} är nedladdad (${plural(rows.length, "uttag", "uttag")})`);
+    notify(`${filename} är nedladdad (${plural(rows.length, "rad", "rader")})`);
   }
 
   container.addEventListener("change", (event) => {
@@ -574,7 +669,7 @@ export async function render(container, ctx) {
       if (approveWeek) {
         const ids = weekIds(approveWeek.dataset.approveWeek);
         await store.approveEntries(ids);
-        notify(`${plural(ids.length, "rad", "rader")} godkända`);
+        notify(plural(ids.length, "rad godkänd", "rader godkända"));
         await refresh();
         return;
       }
@@ -584,7 +679,7 @@ export async function render(container, ctx) {
         const reason = await askReason(ids.length);
         if (!reason) return;
         await store.rejectEntries(ids, reason);
-        notify(`${plural(ids.length, "rad", "rader")} nekade`);
+        notify(plural(ids.length, "rad nekad", "rader nekade"));
         await refresh();
         return;
       }
@@ -592,11 +687,19 @@ export async function render(container, ctx) {
       if (lock) {
         const user = userById(lock.dataset.lock);
         const pending = Number(lock.dataset.pending);
+        // Är månaden inte slut kan det inte heller registreras tid för resten av den
+        const { from, to } = monthRange(state.month);
+        const rest = to >= today() ? { from: from > today() ? from : today(), to } : null;
         const ok = await confirmDialog({
           title: `Markera ${formatMonth(state.month)} som klar för ${user.name}?`,
-          message: pending
-            ? `${plural(pending, "rad är", "rader är")} inte godkända. Månaden låses ändå, och ingen kan ändra något förrän du låser upp den.`
-            : "Månaden låses. Ingen kan ändra något förrän du låser upp den.",
+          message: [
+            pending
+              ? `${plural(pending, "rad är inte godkänd", "rader är inte godkända")}. Månaden låses ändå, och ingen kan ändra något förrän du låser upp den.`
+              : "Månaden låses. Ingen kan ändra något förrän du låser upp den.",
+            rest
+              ? `${formatMonthCapital(state.month)} är inte slut. ${user.name} kan inte heller registrera tid för resten av månaden (${formatShort(rest.from)}–${formatShort(rest.to)}) förrän du låser upp den.`
+              : "",
+          ].filter(Boolean).join(" "),
           confirmLabel: "Markera som klar",
         });
         if (!ok) return;

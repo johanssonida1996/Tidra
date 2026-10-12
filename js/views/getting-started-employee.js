@@ -5,6 +5,7 @@ import { html, setHTML } from "../lib/html.js";
 import { icon } from "../lib/icons.js";
 import { firstName, formatHoursUnit, formatPercent } from "../lib/format.js";
 import { callout, statusPill } from "../lib/ui.js";
+import { projectsOn } from "../lib/place.js";
 
 const DAY_NAMES = { mon: "mån", tue: "tis", wed: "ons", thu: "tor", fri: "fre", sat: "lör", sun: "sön" };
 
@@ -13,6 +14,7 @@ export async function renderEmployeeGuide(container, ctx) {
   const settings = ctx.settings;
   const [entries, workWeek] = await Promise.all([store.listEntries({ userId: me.id }), store.getWorkWeek()]);
 
+  const withProjects = projectsOn(settings);
   const travel = settings.travel ?? { enabled: true };
   const hasVehicles = settings.vehicleTypes.some((v) => !v.hidden);
   const showTrip = travel.enabled || hasVehicles;
@@ -36,7 +38,7 @@ export async function renderEmployeeGuide(container, ctx) {
     {
       done: entries.length > 0,
       title: "Registrera din första tid",
-      text: "Välj kund och projekt, kontrollera timmarna och tryck Spara registrering.",
+      text: `Välj ${withProjects ? "kund och projekt" : "kund"}, kontrollera timmarna och tryck Spara registrering.`,
       href: "#/tid",
       action: "Till tidrapporten",
       doneAction: "Tidrapport",
@@ -62,9 +64,13 @@ export async function renderEmployeeGuide(container, ctx) {
       ? `${days[0][1]}–${days[days.length - 1][1]} ${formatHoursUnit(workWeek[days[0][0]])} per dag`
       : days.map(([key, name]) => `${name} ${formatHoursUnit(workWeek[key])}`).join(" · ");
 
+  // Samma ordning som i formuläret: typ av tid först
   const howTo = [
-    html`<strong>Välj kund och sedan projekt.</strong> Bara pågående projekt går att välja. Saknas ett projekt? Fråga din administratör.`,
-    html`<strong>Välj typ av tid.</strong> Oftast Arbete. Är du ledig väljer du en typ av frånvaro, till exempel semester eller sjuk – då behövs inget projekt.`,
+    html`<strong>Välj typ av tid.</strong> Oftast Arbete. Är du ledig väljer du en typ av frånvaro, till exempel semester eller sjuk –
+      då behövs ${withProjects ? "varken kund eller projekt" : "ingen kund"}, och du kan välja flera dagar på en gång.`,
+    withProjects
+      ? html`<strong>Välj kund och sedan projekt.</strong> Bara pågående projekt går att välja. Saknas ett projekt? Fråga din administratör.`
+      : html`<strong>Välj kund.</strong> Saknas en kund? Fråga din administratör.`,
     html`<strong>Kontrollera timmarna.</strong> De fylls i efter din arbetstid. Ändra med − och + (${stepText} per tryck) eller skriv, till exempel 4,5.`,
     ...(showTrip
       ? [html`<strong>Reste du?</strong> Öppna <em>${travel.enabled ? "Lägg till restid eller milersättning" : "Lägg till milersättning"}</em> och fyll i ${travel.enabled ? "restid och " : ""}fordon.`]
@@ -125,8 +131,8 @@ export async function renderEmployeeGuide(container, ctx) {
 
         <section class="card stack stack--m" aria-labelledby="gs-status">
           <h2 class="card__title" id="gs-status">Vad händer sedan?</h2>
-          <ul class="info-list">
-            <li>${statusPill("draft")}<span>Sparad tid är ett <strong>utkast</strong> tills administratören har granskat den. Du kan ändra och ta bort den.</span></li>
+          <ul class="info-list info-list--stacked">
+            <li>${statusPill("draft")}<span>Sparad tid <strong>väntar på granskning</strong> tills administratören har tittat på den. Fram till dess kan du ändra och ta bort den.</span></li>
             <li>${statusPill("approved")}<span><strong>Godkänd</strong> tid är låst. Behöver något ändras, kontakta din administratör.</span></li>
             <li>${statusPill("rejected")}<span><strong>Nekad</strong> tid visas med en orsak överst i tidrapporten. Redigera raden och spara igen.</span></li>
             <li>${icon("lock", 18)}<span>När månaden är <strong>markerad som klar</strong> går den inte längre att ändra.</span></li>

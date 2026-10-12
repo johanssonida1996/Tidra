@@ -54,12 +54,25 @@ test("tidsfil: sorterad på datum, decimalkomma, restid och fordon", () => {
   assert.ok(lines[1].startsWith("2026-09-23;Anna Admin;1;;;;;VAB;8;"), lines[1]);
   assert.ok(lines[2].startsWith('2026-09-24;Maja Medarbetare;2;100;Brf Almen;P-2041;"Takbyte; etapp 1";Arbete;7,5;;;1;Ja;Privat bil;;34;25;'), lines[2]);
   assert.ok(lines[2].endsWith(";'=SUMMA(A1);Godkänd"), "Formel ska skyddas och status stå i klartext");
+  assert.ok(lines[2].includes(";34;25;85;"), `Milersättningen (34 km × 25 kr/mil = 85 kr) saknas: ${lines[2]}`);
+  assert.ok(lines[3].includes(";Firmabil;Bil per dag;;;;"), "Firmabil ska inte ha någon milersättning");
   assert.ok(lines[3].includes(";Övertid – komptid;2;Komptid;1,5;;;Firmabil;Bil per dag;;;"), lines[3]);
-  assert.ok(lines[3].endsWith(";Utkast"));
+  assert.ok(lines[3].endsWith(";Väntar på granskning"));
 });
 
 test("tidsfil: suffix för vecka", () => {
   assert.equal(buildTimeCsv({ entries: [], users, projects, customers, settings, month: "2026-09", suffix: "-v39" }).filename, "tidla-underlag-2026-09-v39.csv");
+});
+
+test("rader utan projekt (projekt avstängt) får kunden men tomma projektkolumner", () => {
+  const direct = { ...entries[0], id: "e4", projectId: null, customerId: "c1", comment: "" };
+  const lines = buildTimeCsv({ entries: [direct], users, projects, customers, settings, month: "2026-09" }).content.split("\r\n");
+  assert.ok(lines[1].startsWith("2026-09-24;Maja Medarbetare;2;100;Brf Almen;;;Arbete;7,5;"), lines[1]);
+  const material = buildMaterialCsv({
+    materials: [{ id: "m2", userId: "u1", date: "2026-09-24", articleId: null, name: "Spik", unit: "kg", quantity: 1, projectId: null, customerId: "c1", message: "", handled: true, createdAt: 1 }],
+    users, projects, customers, month: "2026-09",
+  }).content.split("\r\n");
+  assert.equal(material[1], "2026-09-24;Maja Medarbetare;100;Brf Almen;;;Spik;;1;kg;;Klar");
 });
 
 test("materialfil: kolumner, artikelnummer och status", () => {

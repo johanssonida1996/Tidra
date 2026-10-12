@@ -3,6 +3,7 @@
 // I mobilen blir vänsterdelen ett marint sidhuvud med bara logotyp och rubrik.
 import { html } from "../lib/html.js";
 import { icon } from "../lib/icons.js";
+import { DEMO_MODE } from "../config.js";
 
 // Standardtexten (inloggningen). Första start skickar in en egen.
 const LOGIN_HERO = {
@@ -10,6 +11,19 @@ const LOGIN_HERO = {
   lead: "Logga in och rapportera dagens tid. Det går snabbare än du tror.",
   features: ["Du ser vad som är godkänt", "Koll på veckan", "Funkar i mobilen"],
 };
+
+// Växeln Logga in / Skapa konto överst i formuläret. Bara i testversionen – i den riktiga
+// versionen finns Skapa konto bara vid första start (nya företag skapas på servern i fas 2).
+export function authSwitch(current) {
+  if (!DEMO_MODE) return "";
+  const tab = (route, label) =>
+    route === current
+      ? html`<a class="segmented__btn" href="#/${route}" aria-current="page">${label}</a>`
+      : html`<a class="segmented__btn" href="#/${route}">${label}</a>`;
+  return html`<nav class="segmented segmented--fit auth__switch" aria-label="Logga in eller skapa konto">
+    ${tab("login", "Logga in")}${tab("signup", "Skapa konto")}
+  </nav>`;
+}
 
 export function authLayout(content, hero = LOGIN_HERO) {
   const { headline, lead, features } = { ...LOGIN_HERO, ...hero };

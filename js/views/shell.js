@@ -7,7 +7,7 @@ import { ROLES } from "../auth.js";
 import { sidebarItems, tabItems } from "../routes.js";
 import { themeToggle } from "../theme.js";
 import { DEMO_MODE } from "../config.js";
-import { demoBar, bindDemoBar } from "../demo/picker.js";
+import { demoBar, bindDemoBar } from "../demo/bar.js";
 
 const current = (active) => (active ? html`aria-current="page"` : "");
 
@@ -73,7 +73,7 @@ export function renderShell(root, { user, settings, route, onLogout }) {
           <div class="main__inner" data-view></div>
         </main>
 
-        <nav class="tabbar" aria-label="Flikmeny">${tabItems(user).map((item) => tabLink(item, route))}</nav>
+        <nav class="tabbar" aria-label="Flikmeny">${tabItems(user, settings).map((item) => tabLink(item, route))}</nav>
       </div>
     `,
   );
@@ -95,6 +95,6 @@ export async function updateBadges(root = document) {
   root.querySelectorAll('[data-badge="materials"]').forEach((badge) => {
     badge.hidden = count === 0;
     badge.textContent = String(count);
-    badge.setAttribute("aria-label", `${count} nya materialuttag`);
+    badge.setAttribute("aria-label", `${count} nya från lagret`);
   });
 }

@@ -1,5 +1,5 @@
 // "Kom igång" – två versioner:
-// Admin: vad som behövs innan medarbetarna kan rapportera tid (kunder, projekt, medarbetare).
+// Admin: vad som behövs innan medarbetarna kan rapportera tid (kunder, projekt om de används, medarbetare).
 // Medarbetare: första stegen och hur man rapporterar tid. Texterna följer admins inställningar.
 // Stegen bockas av automatiskt utifrån datan.
 import * as store from "../store.js";
@@ -12,6 +12,7 @@ import { isAdmin } from "../auth.js";
 import { renderEmployeeGuide } from "./getting-started-employee.js";
 import { allowed } from "./guard.js";
 import { ratesNeedCheck } from "../lib/reminders.js";
+import { projectsOn } from "../lib/place.js";
 
 export async function render(container, ctx) {
   if (!allowed(ctx, ALL, container)) return;
@@ -26,26 +27,31 @@ export async function render(container, ctx) {
     store.listProjects({ selectableOnly: true }),
     store.listUsers(),
   ]);
+  const withProjects = projectsOn(settings);
+  const rates = ratesNeedCheck(settings);
 
   const steps = [
     {
-      done: Boolean(settings.companyName),
+      done: settings.companyReviewed !== false,
       title: "Företag och arbetstid",
-      text: "Företagsnamnet angav du när kontot skapades. Lägg gärna till organisationsnummer och kontrollera arbetstiden – förval är mån–fre 8 h.",
+      text: "Lägg till organisationsnummer och kontrollera arbetstiden – förval är mån–fre 8 h. Steget bockas av när du har sparat.",
       href: "#/installningar/foretag",
-      action: "Ändra",
+      action: "Fyll i",
       doneAction: "Ändra",
     },
     {
       done: customers.length > 0,
       title: "Lägg till din första kund",
-      text: "All tid rapporteras på en kund och ett projekt. Kundnumret följer med i fakturaunderlaget.",
+      text: withProjects
+        ? "All tid rapporteras på en kund och ett projekt. Kundnumret följer med i fakturaunderlaget."
+        : "All tid rapporteras på en kund. Kundnumret följer med i fakturaunderlaget.",
       href: "#/projekt/kunder/ny",
       doneHref: "#/projekt/kunder",
       action: "Lägg till kund",
       doneAction: "Visa kunder",
     },
-    {
+    // Stängs av under Inställningar – då rapporteras tiden direkt på kunden
+    withProjects && {
       done: projects.length > 0,
       title: "Lägg till ett projekt",
       text: "Koppla projektet till kunden. Medarbetarna väljer först kund och sedan projekt – bara pågående projekt går att välja.",
@@ -63,7 +69,7 @@ export async function render(container, ctx) {
       action: "Lägg till medarbetare",
       doneAction: "Visa anställda",
     },
-  ];
+  ].filter(Boolean);
   const doneCount = steps.filter((step) => step.done).length;
   const allDone = doneCount === steps.length;
   const current = steps.findIndex((step) => !step.done);
@@ -125,13 +131,13 @@ export async function render(container, ctx) {
           </div>
           <a class="btn btn--text btn--sm guide__action" href="#/installningar">Inställningar</a>
         </div>
-        ${ratesNeedCheck(settings).due
+        ${rates.due
           ? html`<div class="guide__optional guide__optional--todo">
               <span class="guide__marker guide__marker--todo" aria-hidden="true">${icon("car", 16)}</span>
               <div class="guide__body">
-                <h3 class="guide__title">${ratesNeedCheck(settings).reason === "new-year"
-                  ? `Nytt år – kontrollera milersättningen för ${ratesNeedCheck(settings).year}`
-                  : "Fyll i milersättningen"}</h3>
+                <h3 class="guide__title">${rates.validYear
+                  ? `Milersättningen gäller ${rates.validYear} – kontrollera för ${rates.year}`
+                  : `Kontrollera milersättningen för ${rates.year}`}</h3>
                 <p class="guide__text">Skatteverket ändrar beloppen per mil vid årsskiftet. Beloppen följer med i exporten som underlag.</p>
               </div>
               <a class="btn btn--secondary btn--sm guide__action" href="#/installningar/fordon">Kontrollera</a>
@@ -154,7 +160,7 @@ export async function render(container, ctx) {
         <section class="card stack stack--m" aria-labelledby="gs-how">
           <h2 class="card__title" id="gs-how">Så fungerar Tidla</h2>
           <ul class="info-list">
-            <li>${icon("clock", 18)}<span><strong>Medarbetarna rapporterar</strong> kund, projekt och timmar. Timmarna förifylls enligt arbetstiden. Frånvaro kräver inget projekt.</span></li>
+            <li>${icon("clock", 18)}<span><strong>Medarbetarna rapporterar</strong> ${withProjects ? "kund, projekt" : "kund"} och timmar. Timmarna förifylls enligt arbetstiden. Frånvaro kräver ${withProjects ? "inget projekt" : "ingen kund"}.</span></li>
             <li>${icon("review", 18)}<span><strong>Du granskar</strong> och godkänner eller nekar rader. Nekade rader kan rättas av medarbetaren.</span></li>
             <li>${icon("lock", 18)}<span><strong>Markera månaden som klar</strong> när allt är godkänt – då låses den.</span></li>
             <li>${icon("download", 18)}<span><strong>Fakturaunderlag</strong> exporteras som CSV som öppnas direkt i Excel.</span></li>

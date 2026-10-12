@@ -1,8 +1,9 @@
 // Exportfiler (CSV för Excel): tidsunderlag och materialuttag.
 // Rena funktioner – får data in, ger filnamn och innehåll tillbaka. Testas i tests/export.test.mjs.
 import { toCSV } from "./csv.js";
+import { placeOf } from "./place.js";
 
-const STATUS = { draft: "Utkast", approved: "Godkänd", rejected: "Nekad" };
+const STATUS = { draft: "Väntar på granskning", approved: "Godkänd", rejected: "Nekad" };
 const BASIS = { day: "Bil per dag", km: "Bil per mil" };
 const COMPENSATION = { pay: "Lön", leave: "Komptid" };
 
@@ -15,7 +16,18 @@ function lookups({ users, projects, customers, settings }) {
   return { userById, projectById, customerById, typeById, vehicleById };
 }
 
-// suffix: t.ex. "-v39" när bara en vecka exporteras
+// Del av ett filnamn: "Erik Lind" → "erik-lind", "Brf Åkern" → "brf-akern"
+export function filenamePart(text) {
+  return String(text ?? "")
+    .toLowerCase()
+    .replace(/[åä]/g, "a")
+    .replace(/ö/g, "o")
+    .replace(/é/g, "e")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// suffix: filtren som gällde, t.ex. "-v39-erik-lind-godkanda"
 function filename(prefix, month, suffix = "") {
   return `${prefix}-${month}${suffix}.csv`;
 }
@@ -27,19 +39,21 @@ export function buildTimeCsv({ entries, users, projects, customers, settings, mo
   const header = [
     "Datum", "Anställd", "Anställningsnummer", "Kundnummer", "Kund", "Projektnummer", "Projekt",
     "Typ av tid", "Timmar", "Övertidsersättning", "Faktor",
-    "Restid", "Restid debiteras", "Fordon", "Fordonsgrund", "Km", "Kr/mil",
+    "Restid", "Restid debiteras", "Fordon", "Fordonsgrund", "Km", "Kr/mil", "Milersättning (kr)",
     "Kommentar", "Status",
   ];
   const rows = [...entries]
     .sort((a, b) => (a.date === b.date ? (userById.get(a.userId)?.name ?? "").localeCompare(userById.get(b.userId)?.name ?? "", "sv") : a.date < b.date ? -1 : 1))
     .map((e) => {
       const user = userById.get(e.userId);
-      const project = projectById.get(e.projectId);
-      const customer = customerById.get(project?.customerId);
+      const { project, customer } = placeOf(e, (id) => projectById.get(id), (id) => customerById.get(id));
       const type = typeById.get(e.timeTypeId);
       const vehicle = vehicleById.get(e.vehicleTypeId);
       const overtime = type?.category === "overtime";
       const travel = e.travelHours || 0;
+      const rate = vehicle && !vehicle.isCompanyCar && vehicle.ratePerMil !== null && vehicle.ratePerMil !== undefined ? vehicle.ratePerMil : null;
+      // Milersättning = km / 10 (mil) × kr/mil, avrundat till öre. Firmabil ger ingen ersättning.
+      const allowance = rate !== null && e.km ? Math.round((e.km / 10) * rate * 100) / 100 : "";
       return [
         e.date,
         user?.name ?? "",
@@ -58,6 +72,7 @@ export function buildTimeCsv({ entries, users, projects, customers, settings, mo
         vehicle?.isCompanyCar ? BASIS[e.vehicleBasis] ?? "" : "",
         vehicle && e.km ? e.km : "",
         vehicle && vehicle.ratePerMil !== null && vehicle.ratePerMil !== undefined ? vehicle.ratePerMil : "",
+        allowance,
         e.comment ?? "",
         STATUS[e.status] ?? e.status,
       ];
@@ -78,8 +93,7 @@ export function buildMaterialCsv({ materials, users, projects, customers, articl
   const rows = [...materials]
     .sort((a, b) => (a.date === b.date ? a.createdAt - b.createdAt : a.date < b.date ? -1 : 1))
     .map((m) => {
-      const project = projectById.get(m.projectId);
-      const customer = customerById.get(project?.customerId);
+      const { project, customer } = placeOf(m, (id) => projectById.get(id), (id) => customerById.get(id));
       return [
         m.date,
         userById.get(m.userId)?.name ?? "",
@@ -92,7 +106,7 @@ export function buildMaterialCsv({ materials, users, projects, customers, articl
         m.quantity,
         m.unit,
         m.message ?? "",
-        m.handled ? "Hanterad" : "Ny",
+        m.handled ? "Klar" : "Ny",
       ];
     });
   return { filename: filename("tidla-material", month, suffix), content: toCSV(header, rows) };
