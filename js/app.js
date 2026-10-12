@@ -36,6 +36,9 @@ function resolveRedirect(name, definition, session, setupNeeded) {
   if (name === "stilguide") return null;
   // Testversionen: Logga in och Skapa konto går alltid att växla mellan
   if (DEMO_MODE && !session && (name === "login" || name === "signup")) return null;
+  // Testversionen startar alltid på Logga in, även med en sparad inloggning
+  if (DEMO_MODE && !setupNeeded && name === "") return "login";
+  if (DEMO_MODE && !setupNeeded && name === "login") return null;
   if (setupNeeded) return name === "signup" ? null : "signup";
   if (name === "signup") return session ? HOME : "login";
   if (!definition) return session ? HOME : "login";
