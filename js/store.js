@@ -253,9 +253,17 @@ function migrateOldPrefix() {
   }
 }
 
+// Testversionen hade tidigare exempelföretag. Deras användare har e-post på ".example",
+// som inga riktiga adresser kan ha – finns en sådan raderas all data i webbläsaren.
+async function removeDemoCompanies() {
+  const users = read("users", []);
+  if (Array.isArray(users) && users.some((u) => /\.example$/i.test(u?.email ?? ""))) await resetAllData();
+}
+
 // Anropas en gång vid start. Kontrollerar schemaversionen och lyssnar på ändringar från andra flikar.
 export async function init() {
   migrateOldPrefix();
+  await removeDemoCompanies();
   const version = read("schema", null);
   if (version !== null && version > SCHEMA_VERSION) {
     throw new StoreError("invalid-state", "Datan är sparad av en nyare version av Tidla. Ladda om sidan.");
